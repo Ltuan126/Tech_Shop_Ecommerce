@@ -1,17 +1,38 @@
-// Placeholder customer service for future DB work.
-export interface CustomerRecord {
-  id: number;
-  name: string;
-  email: string;
-  totalOrders: number;
-  totalSpent: number;
-  createdAt: string;
-}
+import { PrismaClient } from '@prisma/client';
+const prisma = new PrismaClient();
+// ...existing code...
 
-export async function listCustomers(): Promise<CustomerRecord[]> {
-  return [];
-}
+export const listCustomers = async (filter: any) => {
+    const { keyword, city } = filter;
 
-export async function getCustomerById(_id: number): Promise<CustomerRecord | null> {
-  return null;
-}
+    return await prisma.customer.findMany({
+        where: {
+            AND: [
+                keyword
+                    ? {
+                          OR: [
+                              { name: { contains: keyword, mode: "insensitive" } },
+                              { email: { contains: keyword, mode: "insensitive" } },
+                          ],
+                      }
+                    : {},
+
+                city
+                    ? { city: { contains: city, mode: "insensitive" } }
+                    : {},
+            ],
+        },
+        include: {
+            orders: true, // JOIN để lấy số đơn hàng
+        },
+    });
+};
+
+export const getCustomerById = async (id: number) => {
+    return await prisma.customer.findUnique({
+        where: { id },
+        include: {
+            orders: true, // lấy lịch sử đơn
+        },
+    });
+};
