@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type React from "react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Input } from "./ui/input";
@@ -15,10 +16,8 @@ import {
   Plus,
   Edit,
   Trash2,
-  TrendingUp,
   DollarSign,
   Eye,
-  BarChart3,
 } from "lucide-react";
 import { motion } from "motion/react";
 import type { Product } from "./ProductCard";
@@ -27,6 +26,7 @@ interface AdminDashboardProps {
   onLogout: () => void;
   userEmail: string;
   products: Product[];
+  authToken?: string | null;
 }
 
 type AdminView = "overview" | "products" | "orders" | "customers" | "settings";
@@ -36,7 +36,7 @@ interface Order {
   customer: string;
   email: string;
   total: number;
-  status: "pending" | "processing" | "shipped" | "delivered";
+  status: "pending" | "processing" | "shipped" | "delivered" | "cancelled";
   date: string;
   items: number;
 }
@@ -50,23 +50,122 @@ interface Customer {
   joined: string;
 }
 
-export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboardProps) {
+const statusOptions: Array<{ value: Order["status"]; label: string }> = [
+  { value: "pending", label: "Chờ xử lý" },
+  { value: "processing", label: "Đang xử lý" },
+  { value: "shipped", label: "Đang giao" },
+  { value: "delivered", label: "Đã giao" },
+  { value: "cancelled", label: "Đã hủy" },
+];
+
+function StatusSelect({
+  value,
+  onChange,
+  renderBadge,
+}: {
+  value: Order["status"];
+  onChange: (status: Order["status"]) => void | Promise<void>;
+  renderBadge: (status: Order["status"]) => React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      {renderBadge(value)}
+      <select
+        className="text-sm border rounded px-2 py-1 bg-white"
+        value={value}
+        onChange={(e) => onChange(e.target.value as Order["status"])}
+      >
+        {statusOptions.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+export function AdminDashboard({ onLogout, userEmail, products, authToken }: AdminDashboardProps) {
   const [currentView, setCurrentView] = useState<AdminView>("overview");
   const [searchQuery, setSearchQuery] = useState("");
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  useEffect(() => {
-    // TODO: replace with actual MySQL fetch logic
-    setOrders((prev) => prev);
-    setCustomers((prev) => prev);
-  }, []);
+  const [productList, setProductList] = useState<any[]>(products || []);
+  const [showProductForm, setShowProductForm] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<any | null>(null);
+  const [detailProduct, setDetailProduct] = useState<any | null>(null);
 
-  const formatVND = (amount: number) => {
-    return new Intl.NumberFormat("vi-VN", {
-      style: "currency",
-      currency: "VND",
-    }).format(amount);
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const headers = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
+        const [orderResp, customerResp, productResp] = await Promise.all([
+          fetch("/api/orders", { headers }),
+          fetch("/api/customers", { headers }),
+          fetch("/api/products", { headers }),
+        ]);
+        const orderJson = await orderResp.json().catch(() => []);
+        const customerJson = await customerResp.json().catch(() => []);
+        const productsJson = await productResp.json().catch(() => []);
+
+        if (orderResp.ok) {
+          setOrders(
+            Array.isArray(orderJson)
+              ? orderJson.map((o: any) => ({
+                  id: o.id ?? o.order_id ?? 0,
+                  customer: o.customer ?? o.customerName ?? "Khách",
+                  email: o.email ?? "",
+                  total: Number(o.total ?? o.total_amount ?? 0),
+                  status: (o.status ?? "pending") as Order["status"],
+                  date: o.createdAt ?? o.order_date ?? o.created_at ?? new Date().toISOString(),
+                  items: Number(o.itemCount ?? o.item_count ?? (o.items?.length ?? 0)),
+                }))
+              : []
+          );
+        }
+
+        if (customerResp.ok) {
+          setCustomers(
+            Array.isArray(customerJson)
+              ? customerJson.map((c: any) => ({
+                  id: c.id ?? c.user_id ?? 0,
+                  name: c.name ?? "Khách",
+                  email: c.email ?? "",
+                  orders: Number(c.orderCount ?? c.orders ?? 0),
+                  spent: Number(c.totalSpent ?? c.spent ?? 0),
+                  joined: c.joined ?? new Date().toISOString(),
+                }))
+              : []
+          );
+        
+        if (productResp.ok) {
+          setProductList(Array.isArray(productsJson) ? productsJson : []);
+        }
+}
+      } catch (err) {
+        console.warn("[AdminDashboard] loadData failed", err);
+      }
+    }
+    loadData();
+  }, [authToken]);
+
+  const refreshProducts = async () => {
+    try {
+      const resp = await fetch("/api/products", {
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+      });
+      const data = await resp.json().catch(() => []);
+      if (resp.ok && Array.isArray(data)) {
+        setProductList(data);
+      }
+    } catch (err) {
+      console.warn('refreshProducts error', err);
+    }
   };
+
+
+  const formatVND = (amount: number) =>
+    new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(amount);
 
   const getStatusColor = (status: Order["status"]) => {
     const colors = {
@@ -74,31 +173,42 @@ export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboard
       processing: "bg-blue-100 text-blue-800",
       shipped: "bg-purple-100 text-purple-800",
       delivered: "bg-green-100 text-green-800",
+      cancelled: "bg-red-100 text-red-800",
     };
-    return colors[status];
+    return colors[status] ?? colors.pending;
   };
 
   const getStatusText = (status: Order["status"]) => {
     const texts = {
-      pending: "Ch? x? l?",
-      processing: "?ang x? l?",
-      shipped: "?ang giao",
-      delivered: "?? giao",
+      pending: "Chờ xử lý",
+      processing: "Đang xử lý",
+      shipped: "Đang giao",
+      delivered: "Đã giao",
+      cancelled: "Đã hủy",
     };
-    return texts[status];
+    return texts[status] ?? status;
   };
 
   const totalRevenue = orders.reduce((sum, order) => sum + order.total, 0);
   const totalOrders = orders.length;
-  const totalProducts = products.length;
+  const totalProducts = productList.length;
   const totalCustomers = customers.length;
+  const filteredProducts = productList.filter((p) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      (p.name || '').toLowerCase().includes(q) ||
+      (p.category_name || p.category || '').toLowerCase().includes(q)
+    );
+  });
+
 
   const menuItems = [
-    { id: "overview" as AdminView, icon: LayoutDashboard, label: "T?ng quan" },
-    { id: "products" as AdminView, icon: Package, label: "S?n ph?m" },
-    { id: "orders" as AdminView, icon: ShoppingCart, label: "?on h?ng" },
-    { id: "customers" as AdminView, icon: Users, label: "Kh?ch h?ng" },
-    { id: "settings" as AdminView, icon: Settings, label: "C?i d?t" },
+    { id: "overview" as AdminView, icon: LayoutDashboard, label: "Tổng quan" },
+    { id: "products" as AdminView, icon: Package, label: "Sản phẩm" },
+    { id: "orders" as AdminView, icon: ShoppingCart, label: "Đơn hàng" },
+    { id: "customers" as AdminView, icon: Users, label: "Khách hàng" },
+    { id: "settings" as AdminView, icon: Settings, label: "Cài đặt" },
   ];
 
   return (
@@ -124,9 +234,7 @@ export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboard
                   key={item.id}
                   onClick={() => setCurrentView(item.id)}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                    currentView === item.id
-                      ? "bg-blue-50 text-blue-600"
-                      : "text-gray-700 hover:bg-gray-50"
+                    currentView === item.id ? "bg-blue-50 text-blue-600" : "text-gray-700 hover:bg-gray-50"
                   }`}
                 >
                   <Icon className="w-5 h-5" />
@@ -139,12 +247,12 @@ export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboard
 
         <div className="absolute bottom-0 left-0 right-0 p-6 border-t">
           <div className="mb-4">
-            <p className="text-sm text-gray-500">?ang nh?p v?i</p>
+            <p className="text-sm text-gray-500">Đang đăng nhập với</p>
             <p className="text-sm truncate">{userEmail}</p>
           </div>
           <Button variant="outline" className="w-full" onClick={onLogout}>
             <LogOut className="w-4 h-4 mr-2" />
-            ?ang xu?t
+            Đăng xuất
           </Button>
         </div>
       </aside>
@@ -153,14 +261,10 @@ export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboard
       <main className="flex-1 ml-64 p-8">
         {/* Overview */}
         {currentView === "overview" && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-          >
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
             <div className="mb-8">
-              <h2 className="text-3xl mb-2">T?ng quan</h2>
-              <p className="text-gray-600">Ch?o m?ng tr? l?i, Admin!</p>
+              <h2 className="text-3xl mb-2">Tổng quan</h2>
+              <p className="text-gray-600">Chào mừng trở lại, Admin!</p>
             </div>
 
             {/* Stats Grid */}
@@ -183,7 +287,7 @@ export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboard
                   </div>
                   <Badge className="bg-green-100 text-green-800">+8.2%</Badge>
                 </div>
-                <p className="text-gray-600 text-sm mb-1">?on h?ng</p>
+                <p className="text-gray-600 text-sm mb-1">Đơn hàng</p>
                 <p className="text-2xl">{totalOrders}</p>
               </Card>
 
@@ -192,9 +296,8 @@ export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboard
                   <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
                     <Package className="w-6 h-6 text-green-600" />
                   </div>
-                  <Badge className="bg-blue-100 text-blue-800">Stable</Badge>
                 </div>
-                <p className="text-gray-600 text-sm mb-1">S?n ph?m</p>
+                <p className="text-gray-600 text-sm mb-1">Sản phẩm</p>
                 <p className="text-2xl">{totalProducts}</p>
               </Card>
 
@@ -203,47 +306,46 @@ export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboard
                   <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
                     <Users className="w-6 h-6 text-orange-600" />
                   </div>
-                  <Badge className="bg-green-100 text-green-800">+15.3%</Badge>
                 </div>
-                <p className="text-gray-600 text-sm mb-1">Kh?ch h?ng</p>
+                <p className="text-gray-600 text-sm mb-1">Khách hàng</p>
                 <p className="text-2xl">{totalCustomers}</p>
               </Card>
             </div>
 
             {/* Recent Orders */}
             <Card className="p-6">
-              <h3 className="text-xl mb-4">?on h?ng g?n d?y</h3>
+              <h3 className="text-xl mb-4">Đơn hàng gần đây</h3>
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b">
-                      <th className="text-left py-3 px-4">M? don</th>
-                      <th className="text-left py-3 px-4">Kh?ch h?ng</th>
-                      <th className="text-left py-3 px-4">Ng?y</th>
-                      <th className="text-left py-3 px-4">T?ng ti?n</th>
-                      <th className="text-left py-3 px-4">Tr?ng th?i</th>
+                      <th className="text-left py-3 px-4">Mã đơn</th>
+                      <th className="text-left py-3 px-4">Khách hàng</th>
+                      <th className="text-left py-3 px-4">Ngày</th>
+                      <th className="text-left py-3 px-4">Tổng tiền</th>
+                      <th className="text-left py-3 px-4">Trạng thái</th>
                     </tr>
                   </thead>
                   <tbody>
                     {orders.length === 0 ? (
                       <tr>
                         <td className="py-6 text-center text-gray-500" colSpan={5}>
-                          Chua c? don h?ng n?o
+                          Chưa có đơn hàng nào
                         </td>
                       </tr>
-                    ) : orders.map((order) => (
-                      <tr key={order.id} className="border-b hover:bg-gray-50">
-                        <td className="py-3 px-4 font-mono">#{order.id}</td>
-                        <td className="py-3 px-4">{order.customer}</td>
-                        <td className="py-3 px-4">{new Date(order.date).toLocaleDateString("vi-VN")}</td>
-                        <td className="py-3 px-4">{formatVND(order.total)}</td>
-                        <td className="py-3 px-4">
-                          <Badge className={getStatusColor(order.status)}>
-                            {getStatusText(order.status)}
-                          </Badge>
-                        </td>
-                      </tr>
-                    ))}
+                    ) : (
+                      orders.map((order) => (
+                        <tr key={order.id} className="border-b hover:bg-gray-50">
+                          <td className="py-3 px-4 font-mono">#{order.id}</td>
+                          <td className="py-3 px-4">{order.customer}</td>
+                          <td className="py-3 px-4">{new Date(order.date).toLocaleDateString("vi-VN")}</td>
+                          <td className="py-3 px-4">{formatVND(order.total)}</td>
+                          <td className="py-3 px-4">
+                            <Badge className={getStatusColor(order.status)}>{getStatusText(order.status)}</Badge>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -253,19 +355,15 @@ export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboard
 
         {/* Products */}
         {currentView === "products" && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-          >
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
             <div className="flex items-center justify-between mb-8">
               <div>
-                <h2 className="text-3xl mb-2">Qu?n l? s?n ph?m</h2>
-                <p className="text-gray-600">T?ng {products.length} s?n ph?m</p>
+                <h2 className="text-3xl mb-2">Quan ly san pham</h2>
+                <p className="text-gray-600">Tong {productList.length} san pham</p>
               </div>
-              <Button className="gap-2">
+              <Button className="gap-2" onClick={() => { setEditingProduct(null); setShowProductForm(true); }}>
                 <Plus className="w-4 h-4" />
-                Th?m s?n ph?m m?i
+                Them san pham
               </Button>
             </div>
 
@@ -273,7 +371,7 @@ export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboard
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <Input
-                  placeholder="T?m ki?m s?n ph?m..."
+                  placeholder="Tim kiem san pham..."
                   className="pl-10"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -282,52 +380,79 @@ export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboard
             </Card>
 
             <div className="grid grid-cols-1 gap-4">
-              {products.map((product) => (
-                <Card key={product.id} className="p-6 hover:shadow-lg transition-shadow">
+              {(filteredProducts.length === 0 ? productList : filteredProducts).map((product) => (
+                <Card key={product.id || product.product_id} className="p-6 hover:shadow-lg transition-shadow">
                   <div className="flex gap-6">
-                    <img
-                      src={product.image}
-                      alt={product.name}
-                      className="w-24 h-24 object-cover rounded-lg"
-                    />
+                    <img src={product.image} alt={product.name} className="w-24 h-24 object-cover rounded-lg" />
                     <div className="flex-1">
                       <div className="flex items-start justify-between mb-2">
                         <div>
                           <h3 className="text-lg mb-1">{product.name}</h3>
-                          <p className="text-sm text-gray-500">{product.category}</p>
+                          <p className="text-sm text-gray-500">{product.category_name || product.category}</p>
                         </div>
-                        <Badge className={product.inStock ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
-                          {product.inStock ? "C?n h?ng" : "H?t h?ng"}
+                        <Badge className={product.stock > 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                          {product.stock > 0 ? "Con hang" : "Het hang"}
                         </Badge>
                       </div>
                       <div className="flex items-center gap-6 mb-4">
                         <div>
-                          <p className="text-sm text-gray-500">Gi? b?n</p>
+                          <p className="text-sm text-gray-500">Gia ban</p>
                           <p className="text-lg">{formatVND(product.price)}</p>
                         </div>
-                        {product.originalPrice && (
+                        {product.original_price || product.originalPrice ? (
                           <div>
-                            <p className="text-sm text-gray-500">Gi? g?c</p>
-                            <p className="text-lg line-through text-gray-400">{formatVND(product.originalPrice)}</p>
+                            <p className="text-sm text-gray-500">Gia goc</p>
+                            <p className="text-lg line-through text-gray-400">{formatVND(product.original_price || product.originalPrice)}</p>
                           </div>
-                        )}
+                        ) : null}
                         <div>
-                          <p className="text-sm text-gray-500">??nh gi?</p>
-                          <p className="text-lg">? {product.rating} ({product.reviews})</p>
+                          <p className="text-sm text-gray-500">Ton kho</p>
+                          <p className="text-lg">{product.stock ?? 0}</p>
                         </div>
                       </div>
                       <div className="flex gap-2">
-                        <Button size="sm" variant="outline">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setEditingProduct(product);
+                            setShowProductForm(true);
+                          }}
+                        >
                           <Edit className="w-4 h-4 mr-2" />
-                          S?a
+                          Sua
                         </Button>
-                        <Button size="sm" variant="outline">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setDetailProduct(product)}
+                        >
                           <Eye className="w-4 h-4 mr-2" />
                           Xem
                         </Button>
-                        <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-red-600 hover:text-red-700"
+                          onClick={async () => {
+                            if (!window.confirm("Xoa san pham nay?")) return;
+                            try {
+                              const resp = await fetch(`/api/products/${product.id || product.product_id}`, {
+                                method: "DELETE",
+                                headers: {
+                                  ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+                                },
+                              });
+                              const data = await resp.json().catch(() => ({}));
+                              if (!resp.ok) throw new Error(data?.message || "Xoa that bai");
+                              setProductList((prev) => prev.filter((p) => (p.id || p.product_id) !== (product.id || product.product_id)));
+                            } catch (err) {
+                              alert(err instanceof Error ? err.message : "Khong the xoa");
+                            }
+                          }}
+                        >
                           <Trash2 className="w-4 h-4 mr-2" />
-                          X?a
+                          Xoa
                         </Button>
                       </div>
                     </div>
@@ -335,19 +460,94 @@ export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboard
                 </Card>
               ))}
             </div>
+            {showProductForm && (
+              <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                <Card className="w-full max-w-2xl p-6 bg-white">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xl">{editingProduct ? "Sua san pham" : "Them san pham"}</h3>
+                    <Button variant="ghost" onClick={() => setShowProductForm(false)}>
+                      Dong
+                    </Button>
+                  </div>
+                  <ProductForm
+                    product={editingProduct}
+                    onCancel={() => setShowProductForm(false)}
+                    onSaved={(p) => {
+                      setShowProductForm(false);
+                      setEditingProduct(null);
+                      if (p?.id || p?.product_id) {
+                        setProductList((prev) => {
+                          const pid = p.id || p.product_id;
+                          const exists = prev.some((it) => (it.id || it.product_id) === pid);
+                          return exists
+                            ? prev.map((it) => ((it.id || it.product_id) === pid ? p : it))
+                            : [p, ...prev];
+                        });
+                      } else {
+                        refreshProducts();
+                      }
+                    }}
+                    authToken={authToken}
+                  />
+                </Card>
+              </div>
+            )}
+            {detailProduct && (
+              <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
+                <Card className="w-full max-w-2xl p-6 bg-white shadow-2xl max-h-[90vh] overflow-y-auto">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-xl font-semibold">Thong tin san pham</h3>
+                      <p className="text-sm text-gray-500">{detailProduct.name}</p>
+                    </div>
+                    <Button variant="ghost" onClick={() => setDetailProduct(null)}>
+                      Dong
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                    <div className="w-full flex justify-center">
+                      {detailProduct.image && (
+                        <div className="bg-gray-50 border rounded-lg p-2 w-full max-w-sm">
+                          <img
+                            src={detailProduct.image}
+                            alt={detailProduct.name}
+                            className="h-64 w-full object-contain rounded mx-auto"
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-2 text-sm text-gray-700">
+                      <p className="text-lg font-semibold break-words">{detailProduct.name}</p>
+                      <p>
+                        Gia ban: <span className="font-medium">{formatVND(detailProduct.price || 0)}</span>
+                      </p>
+                      {(detailProduct.original_price || detailProduct.originalPrice) && (
+                        <p>Gia goc: {formatVND(detailProduct.original_price || detailProduct.originalPrice || 0)}</p>
+                      )}
+                      <p>Ton kho: {detailProduct.stock ?? 0}</p>
+                      <p>Category: {detailProduct.category_name || detailProduct.category || "-"}</p>
+                      <p>Brand ID: {detailProduct.brand_id || detailProduct.brandId || "-"}</p>
+                      <p>Status: {detailProduct.status || "-"}</p>
+                    </div>
+                  </div>
+                  {detailProduct.description && (
+                    <div className="mt-4">
+                      <p className="text-sm text-gray-500 mb-1">Mo ta</p>
+                      <p className="text-sm text-gray-700 whitespace-pre-line">{detailProduct.description}</p>
+                    </div>
+                  )}
+                </Card>
+              </div>
+            )}
           </motion.div>
         )}
 
-        {/* Orders */}
+{/* Orders */}
         {currentView === "orders" && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-          >
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
             <div className="mb-8">
-              <h2 className="text-3xl mb-2">Quan ly don hang</h2>
-              <p className="text-gray-600">Tong {orders.length} don hang</p>
+              <h2 className="text-3xl mb-2">Quản lý đơn hàng</h2>
+              <p className="text-gray-600">Tổng {orders.length} đơn hàng</p>
             </div>
 
             <Card className="p-6">
@@ -355,58 +555,83 @@ export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboard
                 <table className="w-full">
                   <thead>
                     <tr className="border-b">
-                      <th className="text-left py-3 px-4">Ma don</th>
-                      <th className="text-left py-3 px-4">Khach hang</th>
+                      <th className="text-left py-3 px-4">Mã đơn</th>
+                      <th className="text-left py-3 px-4">Khách hàng</th>
                       <th className="text-left py-3 px-4">Email</th>
-                      <th className="text-left py-3 px-4">Ngay</th>
-                      <th className="text-left py-3 px-4">So luong</th>
-                      <th className="text-left py-3 px-4">Tong tien</th>
-                      <th className="text-left py-3 px-4">Trang thai</th>
-                      <th className="text-left py-3 px-4">Hanh dong</th>
+                      <th className="text-left py-3 px-4">Ngày</th>
+                      <th className="text-left py-3 px-4">Số lượng</th>
+                      <th className="text-left py-3 px-4">Tổng tiền</th>
+                      <th className="text-left py-3 px-4">Trạng thái</th>
+                      <th className="text-left py-3 px-4">Hành động</th>
                     </tr>
                   </thead>
                   <tbody>
                     {orders.length === 0 ? (
                       <tr>
                         <td className="py-6 text-center text-gray-500" colSpan={8}>
-                          Chua co don hang nao
+                          Chưa có đơn hàng nào
                         </td>
                       </tr>
-                    ) : orders.map((order) => (
-                      <tr key={order.id} className="border-b hover:bg-gray-50">
-                        <td className="py-3 px-4 font-mono">#{order.id}</td>
-                        <td className="py-3 px-4">{order.customer}</td>
-                        <td className="py-3 px-4 text-sm text-gray-600">{order.email}</td>
-                        <td className="py-3 px-4">{new Date(order.date).toLocaleDateString("vi-VN")}</td>
-                        <td className="py-3 px-4">{order.items} san pham</td>
-                        <td className="py-3 px-4">{formatVND(order.total)}</td>
-                        <td className="py-3 px-4">
-                          <Badge className={getStatusColor(order.status)}>
-                            {getStatusText(order.status)}
-                          </Badge>
-                        </td>
-                        <td className="py-3 px-4">
-                          <Button size="sm" variant="outline">
-                            <Eye className="w-4 h-4" />
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
+                    ) : (
+                      orders.map((order) => (
+                        <tr key={order.id} className="border-b hover:bg-gray-50">
+                          <td className="py-3 px-4 font-mono">#{order.id}</td>
+                          <td className="py-3 px-4">{order.customer}</td>
+                          <td className="py-3 px-4 text-sm text-gray-600">{order.email}</td>
+                          <td className="py-3 px-4">{new Date(order.date).toLocaleDateString("vi-VN")}</td>
+                          <td className="py-3 px-4">{order.items} sản phẩm</td>
+                          <td className="py-3 px-4">{formatVND(order.total)}</td>
+                          <td className="py-3 px-4">
+                            <StatusSelect
+                              value={order.status}
+                              onChange={async (next) => {
+                                try {
+                                  const resp = await fetch(`/api/orders/${order.id}/status`, {
+                                    method: "PATCH",
+                                    headers: {
+                                      "Content-Type": "application/json",
+                                      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+                                    },
+                                    body: JSON.stringify({ status: next }),
+                                  });
+                                  const data = await resp.json().catch(() => ({}));
+                                  if (!resp.ok) throw new Error(data?.message || "Không thể cập nhật trạng thái");
+                                  setOrders((prev) =>
+                                    prev.map((o) => (o.id === order.id ? { ...o, status: next as Order["status"] } : o))
+                                  );
+                                } catch (err) {
+                                  console.error("Update status failed", err);
+                                  alert(err instanceof Error ? err.message : "Không thể cập nhật trạng thái");
+                                }
+                              }}
+                              renderBadge={(status) => (
+                                <Badge className={getStatusColor(status as Order["status"])}>
+                                  {getStatusText(status as Order["status"])}
+                                </Badge>
+                              )}
+                            />
+                          </td>
+                          <td className="py-3 px-4">
+                            <Button size="sm" variant="outline">
+                              <Eye className="w-4 h-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
             </Card>
           </motion.div>
-        )}        {/* Customers */}
+        )}
+
+        {/* Customers */}
         {currentView === "customers" && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-          >
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
             <div className="mb-8">
-              <h2 className="text-3xl mb-2">Quan ly khach hang</h2>
-              <p className="text-gray-600">Tong {customers.length} khach hang</p>
+              <h2 className="text-3xl mb-2">Quản lý khách hàng</h2>
+              <p className="text-gray-600">Tổng {customers.length} khách hàng</p>
             </div>
 
             <Card className="p-6">
@@ -415,36 +640,40 @@ export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboard
                   <thead>
                     <tr className="border-b">
                       <th className="text-left py-3 px-4">ID</th>
-                      <th className="text-left py-3 px-4">Ten khach hang</th>
+                      <th className="text-left py-3 px-4">Tên khách hàng</th>
                       <th className="text-left py-3 px-4">Email</th>
-                      <th className="text-left py-3 px-4">So don</th>
-                      <th className="text-left py-3 px-4">Tong chi tieu</th>
-                      <th className="text-left py-3 px-4">Ngay tham gia</th>
-                      <th className="text-left py-3 px-4">Hanh dong</th>
+                      <th className="text-left py-3 px-4">Số đơn</th>
+                      <th className="text-left py-3 px-4">Tổng chi tiêu</th>
+                      <th className="text-left py-3 px-4">Ngày tham gia</th>
+                      <th className="text-left py-3 px-4">Hành động</th>
                     </tr>
                   </thead>
                   <tbody>
                     {customers.length === 0 ? (
                       <tr>
                         <td className="py-6 text-center text-gray-500" colSpan={7}>
-                          Chua co khach hang nao
+                          Chưa có khách hàng nào
                         </td>
                       </tr>
-                    ) : customers.map((customer) => (
-                      <tr key={customer.id} className="border-b hover:bg-gray-50">
-                        <td className="py-3 px-4">#{customer.id}</td>
-                        <td className="py-3 px-4">{customer.name}</td>
-                        <td className="py-3 px-4 text-sm text-gray-600">{customer.email}</td>
-                        <td className="py-3 px-4">{customer.orders} don</td>
-                        <td className="py-3 px-4">{formatVND(customer.spent)}</td>
-                        <td className="py-3 px-4">{new Date(customer.joined).toLocaleDateString("vi-VN")}</td>
-                        <td className="py-3 px-4">
-                          <Button size="sm" variant="outline">
-                            <Eye className="w-4 h-4" />
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
+                    ) : (
+                      customers.map((customer) => (
+                        <tr key={customer.id} className="border-b hover:bg-gray-50">
+                          <td className="py-3 px-4">#{customer.id}</td>
+                          <td className="py-3 px-4">{customer.name}</td>
+                          <td className="py-3 px-4 text-sm text-gray-600">{customer.email}</td>
+                          <td className="py-3 px-4">{customer.orders} đơn</td>
+                          <td className="py-3 px-4">{formatVND(customer.spent)}</td>
+                          <td className="py-3 px-4">
+                            {new Date(customer.joined).toLocaleDateString("vi-VN")}
+                          </td>
+                          <td className="py-3 px-4">
+                            <Button size="sm" variant="outline">
+                              <Eye className="w-4 h-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -454,73 +683,69 @@ export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboard
 
         {/* Settings */}
         {currentView === "settings" && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-          >
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
             <div className="mb-8">
-              <h2 className="text-3xl mb-2">C?i d?t</h2>
-              <p className="text-gray-600">Qu?n l? c?u h?nh h? th?ng</p>
+              <h2 className="text-3xl mb-2">Cài đặt</h2>
+              <p className="text-gray-600">Quản lý cấu hình hệ thống</p>
             </div>
 
             <div className="space-y-6">
               <Card className="p-6">
-                <h3 className="text-xl mb-4">Th?ng tin c?a h?ng</h3>
+                <h3 className="text-xl mb-4">Thông tin cửa hàng</h3>
                 <div className="space-y-4">
                   <div>
-                    <Label>T?n c?a h?ng</Label>
+                    <Label>Tên cửa hàng</Label>
                     <Input defaultValue="TechStore" />
                   </div>
                   <div>
-                    <Label>Email li?n h?</Label>
+                    <Label>Email liên hệ</Label>
                     <Input defaultValue="support@techstore.vn" />
                   </div>
                   <div>
-                    <Label>S? di?n tho?i</Label>
+                    <Label>Số điện thoại</Label>
                     <Input defaultValue="1900 1234" />
                   </div>
                   <div>
-                    <Label>??a ch?</Label>
-                    <Input defaultValue="123 Nguy?n Hu?, Qu?n 1, TP.HCM" />
+                    <Label>Địa chỉ</Label>
+                    <Input defaultValue="123 Nguyễn Huệ, Quận 1, TP.HCM" />
                   </div>
                 </div>
               </Card>
 
               <Card className="p-6">
-                <h3 className="text-xl mb-4">C?i d?t v?n chuy?n</h3>
+                <h3 className="text-xl mb-4">Cài đặt vận chuyển</h3>
                 <div className="space-y-4">
                   <div>
-                    <Label>Ph? v?n chuy?n m?c d?nh (?)</Label>
+                    <Label>Phí vận chuyển mặc định (₫)</Label>
                     <Input type="number" defaultValue="50000" />
                   </div>
                   <div>
-                    <Label>Mi?n ph? v?n chuy?n t? (?)</Label>
+                    <Label>Miễn phí vận chuyển từ (₫)</Label>
                     <Input type="number" defaultValue="1250000" />
                   </div>
                 </div>
               </Card>
 
               <Card className="p-6">
-                <h3 className="text-xl mb-4">C?i d?t thanh to?n</h3>
+                <h3 className="text-xl mb-4">Cài đặt thanh toán</h3>
                 <div className="space-y-4">
                   <label className="flex items-center gap-3">
                     <input type="checkbox" defaultChecked />
-                    <span>Thanh to?n khi nh?n h?ng (COD)</span>
+                    <span>Thanh toán khi nhận hàng (COD)</span>
                   </label>
                   <label className="flex items-center gap-3">
                     <input type="checkbox" defaultChecked />
-                    <span>Chuy?n kho?n ng?n h?ng</span>
+                    <span>Chuyển khoản ngân hàng</span>
                   </label>
                   <label className="flex items-center gap-3">
                     <input type="checkbox" />
-                    <span>Thanh to?n th? t?n d?ng</span>
+                    <span>Thanh toán thẻ tín dụng</span>
                   </label>
                 </div>
               </Card>
 
               <Button className="w-full" size="lg">
-                Luu thay d?i
+                Lưu thay đổi
               </Button>
             </div>
           </motion.div>
@@ -531,6 +756,157 @@ export function AdminDashboard({ onLogout, userEmail, products }: AdminDashboard
 }
 
 
+function ProductForm({
+  product,
+  onCancel,
+  onSaved,
+  authToken,
+}: {
+  product: any | null;
+  onCancel: () => void;
+  onSaved: (p: any) => void;
+  authToken?: string | null;
+}) {
+  const [form, setForm] = useState({
+    name: product?.name || "",
+    price: product?.price || 0,
+    original_price: product?.original_price || product?.originalPrice || "",
+    stock: product?.stock || 0,
+    category_id: product?.category_id || product?.categoryId || 1,
+    brand_id: product?.brand_id || product?.brandId || 1,
+    status: product?.status || "ACTIVE",
+    image: product?.image || "",
+    description: product?.description || "",
+  });
+  const [saving, setSaving] = useState(false);
 
+  const updateField = (key: string, value: any) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  };
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authToken) {
+      alert("Can dang nhap admin");
+      return;
+    }
+    if (!form.category_id || form.category_id <= 0) {
+      alert("Vui long chon category_id hop le (VD: 1, 2, 3)");
+      return;
+    }
+    if (!form.brand_id || form.brand_id <= 0) {
+      alert("Vui long chon brand_id hop le (VD: 1, 2, 3)");
+      return;
+    }
+    setSaving(true);
+    try {
+      const isEdit = !!product?.id || !!product?.product_id;
+      const pid = product?.id || product?.product_id;
+      const url = isEdit ? `/api/products/${pid}` : "/api/products";
+      const method = isEdit ? "PUT" : "POST";
+      const resp = await fetch(url, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify(form),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data?.message || "Luu that bai");
+      onSaved(data);
+    } catch (err: any) {
+      alert(err?.message || "Khong the luu");
+    } finally {
+      setSaving(false);
+    }
+  };
 
+  return (
+    <form className="space-y-4" onSubmit={handleSubmit}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <Label>Ten san pham</Label>
+          <Input value={form.name} onChange={(e) => updateField("name", e.target.value)} required />
+        </div>
+        <div>
+          <Label>Gia ban</Label>
+          <Input
+            type="number"
+            value={form.price}
+            onChange={(e) => updateField("price", Number(e.target.value))}
+            required
+          />
+        </div>
+        <div>
+          <Label>Gia goc</Label>
+          <Input
+            type="number"
+            value={form.original_price}
+            onChange={(e) => updateField("original_price", e.target.value === "" ? "" : Number(e.target.value))}
+          />
+        </div>
+        <div>
+          <Label>Ton kho</Label>
+          <Input
+            type="number"
+            value={form.stock}
+            onChange={(e) => updateField("stock", Number(e.target.value))}
+            required
+          />
+        </div>
+        <div>
+          <Label>Category ID</Label>
+          <Input
+            type="number"
+            value={form.category_id}
+            onChange={(e) => updateField("category_id", Number(e.target.value))}
+            required
+          />
+        </div>
+        <div>
+          <Label>Brand ID</Label>
+          <Input
+            type="number"
+            value={form.brand_id}
+            onChange={(e) => updateField("brand_id", Number(e.target.value))}
+            required
+          />
+        </div>
+        <div>
+          <Label>Status</Label>
+          <select
+            className="w-full border rounded px-3 py-2"
+            value={form.status}
+            onChange={(e) => updateField("status", e.target.value)}
+          >
+            <option value="ACTIVE">ACTIVE</option>
+            <option value="INACTIVE">INACTIVE</option>
+            <option value="OUT_OF_STOCK">OUT_OF_STOCK</option>
+          </select>
+        </div>
+        <div>
+          <Label>Image URL</Label>
+          <Input value={form.image} onChange={(e) => updateField("image", e.target.value)} />
+        </div>
+      </div>
+      <div>
+        <Label>Mo ta</Label>
+        <textarea
+          className="w-full border rounded px-3 py-2"
+          rows={3}
+          value={form.description}
+          onChange={(e) => updateField("description", e.target.value)}
+        />
+      </div>
+      <div className="flex justify-end gap-3">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Huy
+        </Button>
+        <Button type="submit" disabled={saving}>
+          {saving ? "Dang luu..." : "Luu"}
+        </Button>
+      </div>
+    </form>
+  );
+}

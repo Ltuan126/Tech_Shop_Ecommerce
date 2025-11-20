@@ -1,4 +1,5 @@
-import { query } from "../../src/lib/db";
+import { pool, query } from "../../src/lib/db";
+import type { ResultSetHeader } from "mysql2/promise";
 
 export interface Product {
   product_id: number;
@@ -65,8 +66,8 @@ export async function listProducts(
 
   sql += " ORDER BY p.product_id";
 
-  const [rows] = (await query(sql, params)) as any;
-  return rows as ProductWithCategory[];
+  const rows = await query<ProductWithCategory[]>(sql, params);
+  return rows;
 }
 
 export async function getProductById(
@@ -91,7 +92,82 @@ export async function getProductById(
     WHERE p.product_id = ?
     LIMIT 1
   `;
-  const [rows] = (await query(sql, [id])) as any;
-  const list = rows as ProductWithCategory[];
-  return list[0] ?? null;
+  const rows = await query<ProductWithCategory[]>(sql, [id]);
+  return rows[0] ?? null;
+}
+
+export interface ProductInput {
+  category_id: number;
+  brand_id: number;
+  name: string;
+  price: number;
+  stock: number;
+  warranty_month?: number | null;
+  image?: string | null;
+  description?: string | null;
+  status?: "ACTIVE" | "INACTIVE" | "OUT_OF_STOCK";
+  original_price?: number | null;
+}
+
+export async function createProduct(payload: ProductInput): Promise<ProductWithCategory> {
+  const status = payload.status ?? "ACTIVE";
+  const [result] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO product 
+      (category_id, brand_id, name, price, stock, warranty_month, image, description, status, original_price)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      payload.category_id,
+      payload.brand_id,
+      payload.name,
+      payload.price,
+      payload.stock,
+      payload.warranty_month ?? null,
+      payload.image ?? null,
+      payload.description ?? null,
+      status,
+      payload.original_price ?? null,
+    ]
+  );
+  const id = Number((result as any)?.insertId);
+  const created = await getProductById(id);
+  if (!created) {
+    throw new Error("Failed to fetch created product");
+  }
+  return created;
+}
+
+export async function updateProduct(
+  id: number,
+  payload: Partial<ProductInput>
+): Promise<ProductWithCategory | null> {
+  const existing = await getProductById(id);
+  if (!existing) return null;
+
+  const status = payload.status ?? existing.status;
+
+  await query(
+    `UPDATE product
+     SET category_id = ?, brand_id = ?, name = ?, price = ?, stock = ?, warranty_month = ?, image = ?, description = ?, status = ?, original_price = ?
+     WHERE product_id = ?`,
+    [
+      payload.category_id ?? existing.category_id,
+      payload.brand_id ?? existing.brand_id,
+      payload.name ?? existing.name,
+      payload.price ?? existing.price,
+      payload.stock ?? existing.stock,
+      payload.warranty_month ?? existing.warranty_month ?? null,
+      payload.image ?? existing.image ?? null,
+      payload.description ?? existing.description ?? null,
+      status,
+      payload.original_price ?? existing.original_price ?? null,
+      id,
+    ]
+  );
+
+  return getProductById(id);
+}
+
+export async function deleteProduct(id: number): Promise<boolean> {
+  const res = await query<any>(`DELETE FROM product WHERE product_id = ?`, [id]);
+  return (res as any)?.affectedRows > 0;
 }
