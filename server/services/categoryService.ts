@@ -1,31 +1,73 @@
 import { query } from "../../src/lib/db";
 
-export interface CategoryRecord {
+export interface Category {
+  category_id: number;
   name: string;
-  slug: string;
-  productCount: number;
+  parent_id?: number | null;
 }
 
-const slugify = (value: string) =>
-  value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+export interface CategoryPayload {
+  name: string;
+}
 
-export async function listCategories(): Promise<CategoryRecord[]> {
-  const rows = await query<{ name: string; productCount: number }[]>(
-    `SELECT c.name, COUNT(p.product_id) AS productCount
-     FROM category c
-     LEFT JOIN product p ON p.category_id = c.category_id
-     GROUP BY c.category_id, c.name
-     ORDER BY c.name`
-  );
+export async function listCategories(): Promise<Category[]> {
+  const sql = `
+    SELECT category_id, name, parent_id
+    FROM category
+    ORDER BY category_id
+  `;
+  const [rows] = (await query(sql)) as any;
+  return rows as Category[];
+}
 
-  return rows.map((row) => ({
-    name: row.name,
-    slug: slugify(row.name),
-    productCount: Number(row.productCount) ?? 0,
-  }));
+export async function getCategoryById(id: number): Promise<Category | null> {
+  const sql = `
+    SELECT category_id, name, parent_id
+    FROM category
+    WHERE category_id = ?
+    LIMIT 1
+  `;
+  const [rows] = (await query(sql, [id])) as any;
+  const list = rows as Category[];
+  return list[0] ?? null;
+}
+
+export async function createCategory(payload: CategoryPayload): Promise<Category> {
+  const sql = `
+    INSERT INTO category (name, parent_id)
+    VALUES (?, NULL)
+  `;
+  const [result] = (await query(sql, [payload.name])) as any;
+  const insertId = result.insertId as number;
+
+  const cat = await getCategoryById(insertId);
+  return cat as Category;
+}
+
+export async function updateCategory(
+  id: number,
+  payload: Partial<CategoryPayload>
+): Promise<Category | null> {
+  const sql = `
+    UPDATE category
+    SET name = ?
+    WHERE category_id = ?
+  `;
+  const [result] = (await query(sql, [payload.name, id])) as any;
+  const affected = (result.affectedRows ?? 0) as number;
+
+  if (!affected) return null;
+
+  const cat = await getCategoryById(id);
+  return cat as Category;
+}
+
+export async function deleteCategory(id: number): Promise<boolean> {
+  const sql = `
+    DELETE FROM category
+    WHERE category_id = ?
+  `;
+  const [result] = (await query(sql, [id])) as any;
+  const affected = (result.affectedRows ?? 0) as number;
+  return affected > 0;
 }

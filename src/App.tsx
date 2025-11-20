@@ -4,6 +4,7 @@ import { Hero } from "./components/Hero";
 import { ProductCard } from "./components/ProductCard";
 import type { Product } from "./components/ProductCard";
 import { ShoppingCart } from "./components/ShoppingCart";
+import type { CartItem } from "./components/ShoppingCart";
 import { FilterBar } from "./components/FilterBar";
 import { Checkout } from "./components/Checkout";
 import { AuthPage } from "./components/AuthPage";
@@ -17,7 +18,7 @@ import { Button } from "./components/ui/button.jsx";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export default function App() {
-  const [cartItems, setCartItems] = useState([]);
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [productError, setProductError] = useState<string | null>(null);
@@ -157,9 +158,7 @@ export default function App() {
   };
 
   const handleRemoveItem = (id) => {
-    type CartItem = Product & { quantity: number };
-
-    const [cartItems, setCartItems] = useState<CartItem[]>([]);
+    setCartItems((prev) => prev.filter((item) => item.id !== id));
     toast.success("Đã xóa khỏi giỏ hàng");
   };
 

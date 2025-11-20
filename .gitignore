@@ -1,1 +1,5 @@
 node_modules
+# Environment variables - NEVER commit these!
+.env
+*.env
+server/.env
