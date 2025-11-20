@@ -16,8 +16,8 @@ export async function listCategories(): Promise<Category[]> {
     FROM category
     ORDER BY category_id
   `;
-  const [rows] = (await query(sql)) as any;
-  return rows as Category[];
+  const rows = await query<Category[]>(sql);
+  return rows;
 }
 
 export async function getCategoryById(id: number): Promise<Category | null> {
@@ -27,9 +27,8 @@ export async function getCategoryById(id: number): Promise<Category | null> {
     WHERE category_id = ?
     LIMIT 1
   `;
-  const [rows] = (await query(sql, [id])) as any;
-  const list = rows as Category[];
-  return list[0] ?? null;
+  const rows = await query<Category[]>(sql, [id]);
+  return rows[0] ?? null;
 }
 
 export async function createCategory(payload: CategoryPayload): Promise<Category> {

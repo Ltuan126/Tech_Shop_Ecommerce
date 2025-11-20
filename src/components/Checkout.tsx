@@ -1,20 +1,21 @@
 import { useState } from "react";
+import { ArrowLeft, CreditCard, Truck } from "lucide-react";
+import type { CartItem } from "./ShoppingCart";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { Separator } from "./ui/separator";
-import { ArrowLeft, CreditCard, Truck, MapPin, User } from "lucide-react";
-import type { CartItem } from "./ShoppingCart";
 
 interface CheckoutProps {
   items: CartItem[];
   onBack: () => void;
-  onComplete: () => void;
+  onComplete: (order?: any) => void;
+  authToken?: string | null;
 }
 
-export function Checkout({ items, onBack, onComplete }: CheckoutProps) {
+export function Checkout({ items, onBack, onComplete, authToken }: CheckoutProps) {
   const [paymentMethod, setPaymentMethod] = useState("cod");
   const [formData, setFormData] = useState({
     fullName: "",
@@ -27,77 +28,100 @@ export function Checkout({ items, onBack, onComplete }: CheckoutProps) {
     note: "",
   });
 
-  const formatVND = (amount: number) => {
-    return new Intl.NumberFormat("vi-VN", {
-      style: "currency",
-      currency: "VND",
-    }).format(amount);
-  };
+  const formatVND = (amount: number) =>
+    new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(amount);
 
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const freeShippingThreshold = 1250000;
   const shippingFee = subtotal >= freeShippingThreshold ? 0 : 50000;
   const total = subtotal + shippingFee;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Validate form
-    if (!formData.fullName || !formData.phone || !formData.address) {
-      alert("Vui lòng điền đầy đủ thông tin bắt buộc");
+    if (!authToken) {
+      alert("Vui long dang nhap truoc khi dat hang.");
       return;
     }
-    onComplete();
+    if (!formData.fullName || !formData.phone || !formData.address) {
+      alert("Vui long dien day du thong tin bat buoc.");
+      return;
+    }
+
+    try {
+      const payload = {
+        items: items.map((item) => ({
+          productId: item.id,
+          quantity: item.quantity,
+        })),
+        shippingAddress: `${formData.address}, ${formData.ward || ""}, ${formData.district || ""}, ${
+          formData.city || ""
+        }`.replace(/,\s*,/g, ","),
+        paymentMethod: paymentMethod.toUpperCase(),
+        note: formData.note,
+      };
+
+      const resp = await fetch("/api/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resp.ok) {
+        const error = await resp.json().catch(() => ({}));
+        throw new Error(error?.message || "Khong the tao don hang");
+      }
+
+      const order = await resp.json().catch(() => null);
+      onComplete(order);
+    } catch (err: any) {
+      alert(err?.message || "Khong the tao don hang");
+    }
   };
 
   const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="container mx-auto px-4">
-        {/* Back button */}
-        <Button
-          variant="ghost"
-          className="mb-6"
-          onClick={onBack}
-        >
+        <Button variant="ghost" className="mb-6" onClick={onBack}>
           <ArrowLeft className="w-4 h-4 mr-2" />
-          Quay lại giỏ hàng
+          Quay lai gio hang
         </Button>
 
-        <h1 className="text-3xl mb-8">Thanh toán</h1>
+        <h1 className="text-3xl mb-8">Thanh toan</h1>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left side - Forms */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Shipping Information */}
             <Card className="p-6">
               <div className="flex items-center gap-2 mb-6">
                 <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
                   <Truck className="w-5 h-5 text-blue-600" />
                 </div>
-                <h2 className="text-2xl">Thông tin giao hàng</h2>
+                <h2 className="text-2xl">Thong tin giao hang</h2>
               </div>
 
-              <form className="space-y-4">
+              <form className="space-y-4" onSubmit={handleSubmit}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="fullName">
-                      Họ và tên <span className="text-red-500">*</span>
+                      Ho va ten <span className="text-red-500">*</span>
                     </Label>
                     <Input
                       id="fullName"
-                      placeholder="Nguyễn Văn A"
+                      placeholder="Nguyen Van A"
                       value={formData.fullName}
                       onChange={(e) => handleInputChange("fullName", e.target.value)}
                       required
                     />
                   </div>
-
                   <div className="space-y-2">
                     <Label htmlFor="phone">
-                      Số điện thoại <span className="text-red-500">*</span>
+                      So dien thoai <span className="text-red-500">*</span>
                     </Label>
                     <Input
                       id="phone"
@@ -123,11 +147,11 @@ export function Checkout({ items, onBack, onComplete }: CheckoutProps) {
 
                 <div className="space-y-2">
                   <Label htmlFor="address">
-                    Địa chỉ <span className="text-red-500">*</span>
+                    Dia chi <span className="text-red-500">*</span>
                   </Label>
                   <Input
                     id="address"
-                    placeholder="Số nhà, tên đường"
+                    placeholder="So nha, ten duong"
                     value={formData.address}
                     onChange={(e) => handleInputChange("address", e.target.value)}
                     required
@@ -136,30 +160,28 @@ export function Checkout({ items, onBack, onComplete }: CheckoutProps) {
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="city">Tỉnh/Thành phố</Label>
+                    <Label htmlFor="city">Tinh/Thanh pho</Label>
                     <Input
                       id="city"
-                      placeholder="TP. Hồ Chí Minh"
+                      placeholder="TP. Ho Chi Minh"
                       value={formData.city}
                       onChange={(e) => handleInputChange("city", e.target.value)}
                     />
                   </div>
-
                   <div className="space-y-2">
-                    <Label htmlFor="district">Quận/Huyện</Label>
+                    <Label htmlFor="district">Quan/Huyen</Label>
                     <Input
                       id="district"
-                      placeholder="Quận 1"
+                      placeholder="Quan 1"
                       value={formData.district}
                       onChange={(e) => handleInputChange("district", e.target.value)}
                     />
                   </div>
-
                   <div className="space-y-2">
-                    <Label htmlFor="ward">Phường/Xã</Label>
+                    <Label htmlFor="ward">Phuong/Xa</Label>
                     <Input
                       id="ward"
-                      placeholder="Phường Bến Nghé"
+                      placeholder="Phuong Ben Nghe"
                       value={formData.ward}
                       onChange={(e) => handleInputChange("ward", e.target.value)}
                     />
@@ -167,12 +189,12 @@ export function Checkout({ items, onBack, onComplete }: CheckoutProps) {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="note">Ghi chú (tùy chọn)</Label>
+                  <Label htmlFor="note">Ghi chu (tuy chon)</Label>
                   <textarea
                     id="note"
                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     rows={3}
-                    placeholder="Ghi chú về đơn hàng, ví dụ: giao hàng giờ hành chính"
+                    placeholder="Ghi chu ve don hang, vi du: giao gio hanh chinh"
                     value={formData.note}
                     onChange={(e) => handleInputChange("note", e.target.value)}
                   />
@@ -180,13 +202,12 @@ export function Checkout({ items, onBack, onComplete }: CheckoutProps) {
               </form>
             </Card>
 
-            {/* Payment Method */}
             <Card className="p-6">
               <div className="flex items-center gap-2 mb-6">
                 <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
                   <CreditCard className="w-5 h-5 text-green-600" />
                 </div>
-                <h2 className="text-2xl">Phương thức thanh toán</h2>
+                <h2 className="text-2xl">Phuong thuc thanh toan</h2>
               </div>
 
               <RadioGroup value={paymentMethod} onValueChange={setPaymentMethod}>
@@ -196,11 +217,9 @@ export function Checkout({ items, onBack, onComplete }: CheckoutProps) {
                     <Label htmlFor="cod" className="flex-1 cursor-pointer">
                       <div className="flex items-center gap-2 mb-1">
                         <Truck className="w-5 h-5 text-gray-600" />
-                        <span className="font-medium">Thanh toán khi nhận hàng (COD)</span>
+                        <span className="font-medium">Thanh toan khi nhan hang (COD)</span>
                       </div>
-                      <p className="text-sm text-gray-600">
-                        Thanh toán bằng tiền mặt khi nhận hàng
-                      </p>
+                      <p className="text-sm text-gray-600">Thanh toan tien mat khi nhan hang</p>
                     </Label>
                   </div>
 
@@ -209,11 +228,9 @@ export function Checkout({ items, onBack, onComplete }: CheckoutProps) {
                     <Label htmlFor="bank" className="flex-1 cursor-pointer">
                       <div className="flex items-center gap-2 mb-1">
                         <CreditCard className="w-5 h-5 text-gray-600" />
-                        <span className="font-medium">Chuyển khoản ngân hàng</span>
+                        <span className="font-medium">Chuyen khoan ngan hang</span>
                       </div>
-                      <p className="text-sm text-gray-600">
-                        Chuyển khoản qua Internet Banking hoặc QR Code
-                      </p>
+                      <p className="text-sm text-gray-600">Chuyen khoan qua Internet Banking hoac QR Code</p>
                     </Label>
                   </div>
 
@@ -222,12 +239,10 @@ export function Checkout({ items, onBack, onComplete }: CheckoutProps) {
                     <Label htmlFor="card" className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <CreditCard className="w-5 h-5 text-gray-600" />
-                        <span className="font-medium">Thẻ tín dụng/ghi nợ</span>
-                        <span className="text-xs bg-gray-200 px-2 py-1 rounded">Sắp ra mắt</span>
+                        <span className="font-medium">The tin dung/ghi no</span>
+                        <span className="text-xs bg-gray-200 px-2 py-1 rounded">Sap ra mat</span>
                       </div>
-                      <p className="text-sm text-gray-600">
-                        Visa, Mastercard, JCB
-                      </p>
+                      <p className="text-sm text-gray-600">Visa, Mastercard, JCB</p>
                     </Label>
                   </div>
                 </div>
@@ -235,32 +250,35 @@ export function Checkout({ items, onBack, onComplete }: CheckoutProps) {
 
               {paymentMethod === "bank" && (
                 <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                  <p className="text-sm mb-2">Thông tin chuyển khoản:</p>
+                  <p className="text-sm mb-2">Thong tin chuyen khoan:</p>
                   <div className="space-y-1 text-sm">
-                    <p><strong>Ngân hàng:</strong> Vietcombank</p>
-                    <p><strong>Số tài khoản:</strong> 1234567890</p>
-                    <p><strong>Chủ tài khoản:</strong> CONG TY TECHSTORE</p>
-                    <p><strong>Nội dung:</strong> [Họ tên] [Số điện thoại]</p>
+                    <p>
+                      <strong>Ngan hang:</strong> Vietcombank
+                    </p>
+                    <p>
+                      <strong>So tai khoan:</strong> 1234567890
+                    </p>
+                    <p>
+                      <strong>Chu tai khoan:</strong> CONG TY TECHSTORE
+                    </p>
+                    <p>
+                      <strong>Noi dung:</strong> [Ho ten] [So dien thoai]
+                    </p>
                   </div>
                 </div>
               )}
             </Card>
           </div>
 
-          {/* Right side - Order Summary */}
           <div className="lg:col-span-1">
             <Card className="p-6 sticky top-24">
-              <h2 className="text-2xl mb-6">Đơn hàng của bạn</h2>
+              <h2 className="text-2xl mb-6">Don hang cua ban</h2>
 
               <div className="space-y-4 mb-6">
                 {items.map((item) => (
                   <div key={item.id} className="flex gap-3">
                     <div className="relative">
-                      <img
-                        src={item.image}
-                        alt={item.name}
-                        className="w-16 h-16 object-cover rounded-lg"
-                      />
+                      <img src={item.image} alt={item.name} className="w-16 h-16 object-cover rounded-lg" />
                       <span className="absolute -top-2 -right-2 bg-gray-700 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">
                         {item.quantity}
                       </span>
@@ -277,44 +295,40 @@ export function Checkout({ items, onBack, onComplete }: CheckoutProps) {
 
               <div className="space-y-3">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Tạm tính</span>
+                  <span className="text-gray-600">Tam tinh</span>
                   <span>{formatVND(subtotal)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Phí vận chuyển</span>
+                  <span className="text-gray-600">Phi van chuyen</span>
                   <span className={shippingFee === 0 ? "text-green-600" : ""}>
-                    {shippingFee === 0 ? "MIỄN PHÍ" : formatVND(shippingFee)}
+                    {shippingFee === 0 ? "MIEN PHI" : formatVND(shippingFee)}
                   </span>
                 </div>
 
                 {subtotal > 0 && subtotal < freeShippingThreshold && (
                   <div className="text-xs text-blue-600 bg-blue-50 p-2 rounded">
-                    Mua thêm {formatVND(freeShippingThreshold - subtotal)} để được miễn phí vận chuyển
+                    Mua them {formatVND(freeShippingThreshold - subtotal)} de duoc mien phi van chuyen
                   </div>
                 )}
 
                 <Separator />
 
                 <div className="flex justify-between items-center">
-                  <span className="text-lg">Tổng cộng</span>
+                  <span className="text-lg">Tong cong</span>
                   <span className="text-2xl text-blue-600">{formatVND(total)}</span>
                 </div>
               </div>
 
-              <Button
-                className="w-full mt-6"
-                size="lg"
-                onClick={handleSubmit}
-              >
-                Hoàn tất đặt hàng
+              <Button className="w-full mt-6" size="lg" onClick={handleSubmit}>
+                Hoan tat dat hang
               </Button>
 
               <p className="text-xs text-gray-500 text-center mt-4">
-                Bằng việc đặt hàng, bạn đồng ý với{" "}
+                Bang viec dat hang, ban dong y voi{" "}
                 <a href="#" className="text-blue-600 hover:underline">
-                  Điều khoản dịch vụ
+                  Dieu khoan dich vu
                 </a>{" "}
-                của chúng tôi
+                cua chung toi
               </p>
             </Card>
           </div>

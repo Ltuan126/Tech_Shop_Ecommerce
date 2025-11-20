@@ -8,11 +8,12 @@ import { Label } from "./ui/label";
 import { Input } from "./ui/input";
 
 interface AuthPageProps {
-  onLogin: (email: string, isAdmin: boolean) => void;
+  onLogin: (payload: { email: string; role: string; token: string }) => void;
   onClose: () => void;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+// Prefer .env override, otherwise default to local backend
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || "http://localhost:3001";
 
 export function AuthPage({ onLogin, onClose }: AuthPageProps) {
   const [showPassword, setShowPassword] = useState(false);
@@ -52,7 +53,14 @@ export function AuthPage({ onLogin, onClose }: AuthPageProps) {
         throw new Error(payload?.message ?? "Unable to sign in.");
       }
 
-      onLogin(payload.user.email, payload.user.role === "admin");
+      const token: string = payload?.token;
+      const role: string = payload?.user?.role ?? "";
+      const email: string = payload?.user?.email ?? "";
+      if (!token) {
+        throw new Error("Thiếu token đăng nhập");
+      }
+
+      onLogin({ email, role, token });
       setLoginData({ email: "", password: "" });
       onClose();
     } catch (error) {
@@ -94,7 +102,14 @@ export function AuthPage({ onLogin, onClose }: AuthPageProps) {
         throw new Error(payload?.message ?? "Unable to create account.");
       }
 
-      onLogin(payload.user.email, payload.user.role === "admin");
+      const token: string = payload?.token;
+      const role: string = payload?.user?.role ?? "";
+      const email: string = payload?.user?.email ?? "";
+      if (!token) {
+        throw new Error("Thiếu token đăng ký");
+      }
+
+      onLogin({ email, role, token });
       setRegisterData({ fullName: "", email: "", password: "", confirmPassword: "" });
       onClose();
     } catch (error) {
