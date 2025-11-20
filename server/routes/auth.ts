@@ -26,8 +26,8 @@ router.post("/login", async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ message: "Thiếu email hoặc mật khẩu" });
     }
-    const user = await loginUser({ email, password });
-    res.json({ user });
+    const response = await loginUser({ email, password });
+    res.json(response); // Return { user, token }
   } catch (error) {
     console.error("[POST /api/auth/login] failed:", error);
     if (error instanceof AuthError) {
@@ -37,12 +37,26 @@ router.post("/login", async (req, res) => {
   }
 });
 
-router.get("/me", async (_req, res) => {
-  const user = await getCurrentUser();
-  if (!user) {
-    return res.status(401).json({ message: "Not authenticated" });
+router.get("/me", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Không tìm thấy token" });
+    }
+
+    const token = authHeader.split(" ")[1];
+    const user = await getCurrentUser(token);
+
+    if (!user) {
+      return res.status(401).json({ message: "Token không hợp lệ hoặc đã hết hạn" });
+    }
+
+    res.json({ user });
+  } catch (error) {
+    console.error("[GET /api/auth/me] failed:", error);
+    res.status(500).json({ message: "Không thể xác thực" });
   }
-  res.json(user);
 });
 
 router.post("/logout", (_req, res) => {
