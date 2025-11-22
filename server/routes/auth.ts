@@ -10,7 +10,9 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ message: "Thiếu thông tin đăng ký" });
     }
     const user = await registerUser({ fullName, email, password });
-    res.status(201).json({ user });
+    // Auto-login ngay sau khi đăng ký để trả về token cho frontend
+    const loginResponse = await loginUser({ email, password });
+    res.status(201).json(loginResponse); // { user, token }
   } catch (error) {
     console.error("[POST /api/auth/register] failed:", error);
     if (error instanceof AuthError) {

@@ -1,4 +1,5 @@
-import { query } from "../../src/lib/db";
+import { query, pool } from "../../src/lib/db";
+import bcrypt from "bcryptjs";
 
 export interface CustomerRecord {
   id: number;
@@ -13,6 +14,24 @@ export interface CustomerRecord {
 export interface CustomerWithOrders extends CustomerRecord {
   orderCount: number;
   totalSpent: number;
+}
+
+export interface CreateCustomerPayload {
+  name: string;
+  email: string;
+  password: string;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+}
+
+export interface UpdateCustomerPayload {
+  name?: string | null;
+  email?: string | null;
+  password?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
 }
 
 /**
@@ -110,4 +129,86 @@ export const getCustomerById = async (id: number): Promise<CustomerWithOrders | 
     orderCount: Number(row.orderCount),
     totalSpent: Number(row.totalSpent)
   };
+};
+
+export const createCustomer = async (payload: CreateCustomerPayload): Promise<CustomerWithOrders> => {
+  const { name, email, password, phone = null, address = null, city = null } = payload;
+
+  const existing = await query<any[]>(`SELECT user_id FROM user WHERE email = ? LIMIT 1`, [email]);
+  if (existing[0]) {
+    throw new Error("Email đã tồn tại");
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [userResult] = await conn.execute(
+      `INSERT INTO user (name, email, password, role, phone, address, city) VALUES (?, ?, ?, 'CUSTOMER', ?, ?, ?)`,
+      [name, email, passwordHash, phone, address, city]
+    );
+    const userId = (userResult as any).insertId;
+    await conn.execute(
+      `INSERT INTO customer (user_id, phone, address, city) VALUES (?, ?, ?, ?)`,
+      [userId, phone, address, city]
+    );
+    await conn.commit();
+    const created = await getCustomerById(userId);
+    if (!created) {
+      throw new Error("Không thể tạo khách hàng");
+    }
+    return created;
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+};
+
+export const updateCustomer = async (id: number, payload: UpdateCustomerPayload): Promise<CustomerWithOrders | null> => {
+  const fields: string[] = [];
+  const params: any[] = [];
+
+  if (payload.name !== undefined) {
+    fields.push("name = ?");
+    params.push(payload.name);
+  }
+  if (payload.email !== undefined) {
+    fields.push("email = ?");
+    params.push(payload.email);
+  }
+  if (payload.phone !== undefined) {
+    fields.push("phone = ?");
+    params.push(payload.phone);
+  }
+  if (payload.address !== undefined) {
+    fields.push("address = ?");
+    params.push(payload.address);
+  }
+  if (payload.city !== undefined) {
+    fields.push("city = ?");
+    params.push(payload.city);
+  }
+  if (payload.password) {
+    fields.push("password = ?");
+    params.push(await bcrypt.hash(payload.password, 10));
+  }
+
+  if (fields.length === 0) {
+    return getCustomerById(id);
+  }
+
+  params.push(id);
+  await query(`UPDATE user SET ${fields.join(", ")} WHERE user_id = ? AND role IN ('CUSTOMER','USER')`, params);
+  await query(
+    `UPDATE customer SET phone = COALESCE(?, phone), address = COALESCE(?, address), city = COALESCE(?, city) WHERE user_id = ?`,
+    [payload.phone ?? null, payload.address ?? null, payload.city ?? null, id]
+  );
+  return getCustomerById(id);
+};
+
+export const deleteCustomer = async (id: number): Promise<boolean> => {
+  const [result] = await query<any>(`DELETE FROM user WHERE user_id = ? AND role IN ('CUSTOMER','USER')`, [id]);
+  return (result as any)?.affectedRows > 0;
 };
