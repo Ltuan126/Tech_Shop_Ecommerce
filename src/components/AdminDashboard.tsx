@@ -406,7 +406,7 @@ export function AdminDashboard({ onLogout, userEmail, products, authToken }: Adm
                           </div>
                         ) : null}
                         <div>
-                          <p className="text-sm text-gray-500">Ton kho</p>
+                          <p className="text-sm text-gray-500">Tồn kho</p>
                           <p className="text-lg">{product.stock ?? 0}</p>
                         </div>
                       </div>
@@ -532,7 +532,7 @@ export function AdminDashboard({ onLogout, userEmail, products, authToken }: Adm
                   </div>
                   {detailProduct.description && (
                     <div className="mt-4">
-                      <p className="text-sm text-gray-500 mb-1">Mo ta</p>
+                      <p className="text-sm text-gray-500 mb-1">Mô tả</p>
                       <p className="text-sm text-gray-700 whitespace-pre-line">{detailProduct.description}</p>
                     </div>
                   )}
@@ -847,7 +847,7 @@ function ProductForm({
           />
         </div>
         <div>
-          <Label>Ton kho</Label>
+          <Label>Tồn kho</Label>
           <Input
             type="number"
             value={form.stock}
@@ -891,7 +891,7 @@ function ProductForm({
         </div>
       </div>
       <div>
-        <Label>Mo ta</Label>
+        <Label>Mô tả</Label>
         <textarea
           className="w-full border rounded px-3 py-2"
           rows={3}
@@ -904,7 +904,7 @@ function ProductForm({
           Huy
         </Button>
         <Button type="submit" disabled={saving}>
-          {saving ? "Dang luu..." : "Luu"}
+          {saving ? "Dang luu..." : "Lưu"}
         </Button>
       </div>
     </form>

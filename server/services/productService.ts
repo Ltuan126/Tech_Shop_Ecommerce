@@ -17,6 +17,8 @@ export interface Product {
 
 export interface ProductWithCategory extends Product {
   category_name?: string | null;
+  review_count?: number;
+  avg_rating?: number;
 }
 
 export interface ProductFilter {
@@ -41,9 +43,12 @@ export async function listProducts(
       p.description,
       p.status,
       p.original_price,
-      c.name AS category_name
+      c.name AS category_name,
+      COALESCE(prs.review_count, 0) AS review_count,
+      COALESCE(prs.avg_rating, 0) AS avg_rating
     FROM product p
     LEFT JOIN category c ON p.category_id = c.category_id
+    LEFT JOIN product_rating_summary prs ON p.product_id = prs.product_id
     WHERE 1 = 1
   `;
 
@@ -86,9 +91,12 @@ export async function getProductById(
       p.description,
       p.status,
       p.original_price,
-      c.name AS category_name
+      c.name AS category_name,
+      COALESCE(prs.review_count, 0) AS review_count,
+      COALESCE(prs.avg_rating, 0) AS avg_rating
     FROM product p
     LEFT JOIN category c ON p.category_id = c.category_id
+    LEFT JOIN product_rating_summary prs ON p.product_id = prs.product_id
     WHERE p.product_id = ?
     LIMIT 1
   `;

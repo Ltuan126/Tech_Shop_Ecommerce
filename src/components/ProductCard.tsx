@@ -20,6 +20,7 @@ export interface Product {
 interface ProductCardProps {
   product: Product;
   onAddToCart: (product: Product) => void;
+  onViewDetail?: (productId: number) => void;
   index?: number;
 }
 
@@ -28,7 +29,7 @@ function formatVND(amount: number): string {
   return new Intl.NumberFormat('vi-VN').format(amount) + '₫';
 }
 
-export function ProductCard({ product, onAddToCart, index = 0 }: ProductCardProps) {
+export function ProductCard({ product, onAddToCart, onViewDetail, index = 0 }: ProductCardProps) {
   const discount = product.originalPrice
     ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
     : 0;
@@ -123,7 +124,12 @@ export function ProductCard({ product, onAddToCart, index = 0 }: ProductCardProp
         
         <div className="p-4 relative z-10">
           <p className="text-sm text-gray-500 mb-1">{product.category}</p>
-          <h3 className="mb-2 line-clamp-2 group-hover:text-blue-600 transition-colors">{product.name}</h3>
+          <h3
+            className="mb-2 line-clamp-2 group-hover:text-blue-600 transition-colors cursor-pointer"
+            onClick={() => onViewDetail?.(product.id)}
+          >
+            {product.name}
+          </h3>
           
           <div className="flex items-center gap-1 mb-3">
             <div className="flex">

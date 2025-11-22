@@ -9,6 +9,7 @@ import { FilterBar } from "./components/FilterBar";
 import { Checkout } from "./components/Checkout";
 import { AuthPage } from "./components/AuthPage";
 import { AdminDashboard } from "./components/AdminDashboard";
+import ProductDetail from "./components/ProductDetail";
 import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner@2.0.3";
 import { Card } from "./components/ui/card";
@@ -41,6 +42,7 @@ export default function App() {
   const [orderHistory, setOrderHistory] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   const [selectedOrderLoading, setSelectedOrderLoading] = useState(false);
+  const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
 
   // Refs for sections
   const homeRef = useRef(null);
@@ -94,8 +96,8 @@ export default function App() {
               image: item?.image ?? "",
               category: item?.category ?? item?.category_name ?? "Uncategorized",
               inStock,
-              rating: typeof item?.rating === "number" ? item.rating : 5,
-              reviews: typeof item?.reviews === "number" ? item.reviews : 0,
+              rating: typeof item?.avg_rating === "number" ? item.avg_rating : (typeof item?.rating === "number" ? item.rating : 5),
+              reviews: typeof item?.review_count === "number" ? item.review_count : (typeof item?.reviews === "number" ? item.reviews : 0),
             };
           });
         })();
@@ -478,6 +480,7 @@ export default function App() {
                   key={product.id}
                   product={product}
                   onAddToCart={handleAddToCart}
+                  onViewDetail={setSelectedProductId}
                   index={index}
                 />
               ))}
@@ -569,7 +572,7 @@ export default function App() {
                 if (!Array.isArray(items) || items.length === 0) return null;
                 return (
                   <div className="mt-4">
-                    <p className="font-semibold mb-2">San pham</p>
+                    <p className="font-semibold mb-2">Sản phẩm</p>
                     <div className="space-y-2">
                       {items.map((item: any, idx: number) => (
                         <div key={idx} className="flex justify-between text-sm">
@@ -580,7 +583,7 @@ export default function App() {
                           </span>
                           <span className="font-medium">
                             {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(
-                              (item.unit_price || item.price || 0) * (item.quantity || 1)
+                              (item.unitPrice || item.unit_price || item.price || 0) * (item.quantity || 1)
                             )}
                           </span>
                         </div>
@@ -775,7 +778,7 @@ export default function App() {
             <div>
               <h3 className="text-xl mb-4">TechStore</h3>
               <p className="text-gray-400">
-                Diem den mot cua cho cong nghe va phu kien moi nhat.
+                Điểm đến hàng đầu cho công nghệ và phụ kiện mới nhất.
               </p>
             </div>
             <div>
@@ -826,6 +829,14 @@ export default function App() {
         onRemoveItem={handleRemoveItem}
         onCheckout={handleCheckout}
       />
+
+      {selectedProductId && (
+        <ProductDetail
+          productId={selectedProductId}
+          onClose={() => setSelectedProductId(null)}
+          onAddToCart={handleAddToCart}
+        />
+      )}
 
       <Toaster position="bottom-right" />
     </div>
