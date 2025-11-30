@@ -22,6 +22,7 @@ export interface ProductReview {
   // Joined fields
   user_name?: string;
   user_email?: string;
+  product_name?: string;
 }
 
 export interface CreateReviewInput {
@@ -74,31 +75,16 @@ class ReviewService {
       throw new Error("Rating phải từ 1 đến 5");
     }
 
-    // Kiểm tra user đã mua sản phẩm này chưa
-    let isVerifiedPurchase = false;
-    if (input.order_id) {
-      const [orderCheck] = await query<RowDataPacket[]>(
-        `SELECT od.product_id, o.customer_id, c.user_id
-         FROM order_detail od
-         JOIN \`order\` o ON od.order_id = o.order_id
-         JOIN customer c ON o.customer_id = c.customer_id
-         WHERE od.order_id = ? AND od.product_id = ? AND c.user_id = ? AND o.status = 'DELIVERED'`,
-        [input.order_id, input.product_id, input.user_id]
-      );
-      isVerifiedPurchase = !!orderCheck;
+    // Kiểm tra quyền đánh giá
+    const permission = await this.canUserReview(input.user_id, input.product_id);
+    if (!permission.canReview) {
+      throw new Error(permission.reason || "Bạn không có quyền đánh giá sản phẩm này");
     }
 
-    // Kiểm tra user đã review sản phẩm này chưa
-    const [existingReview] = await query<RowDataPacket[]>(
-      "SELECT review_id FROM product_reviews WHERE product_id = ? AND user_id = ?",
-      [input.product_id, input.user_id]
-    );
+    // Sử dụng order_id từ permission nếu không được cung cấp
+    const orderId = input.order_id || permission.orderId;
 
-    if (existingReview) {
-      throw new Error("Bạn đã đánh giá sản phẩm này rồi");
-    }
-
-    // Insert review
+    // Insert review (is_verified_purchase = true vì đã kiểm tra ở trên)
     const result = await query<ResultSetHeader>(
       `INSERT INTO product_reviews
        (product_id, user_id, order_id, rating, title, comment, images, is_verified_purchase, status)
@@ -106,13 +92,13 @@ class ReviewService {
       [
         input.product_id,
         input.user_id,
-        input.order_id || null,
+        orderId,
         input.rating,
         input.title || null,
         input.comment || null,
         input.images ? JSON.stringify(input.images) : null,
-        isVerifiedPurchase,
-        "APPROVED", // Auto approve, hoặc có thể set PENDING để admin duyệt
+        true, // Luôn là verified purchase vì đã kiểm tra ở canUserReview
+        "APPROVED", // Auto approve
       ]
     );
 
@@ -185,9 +171,10 @@ class ReviewService {
 
     // Get reviews
     const reviews = await query<RowDataPacket[]>(
-      `SELECT pr.*, u.name AS user_name, u.email AS user_email
+      `SELECT pr.*, u.name AS user_name, u.email AS user_email, p.name AS product_name
        FROM product_reviews pr
        JOIN user u ON pr.user_id = u.user_id
+       LEFT JOIN product p ON pr.product_id = p.product_id
        ${whereClause}
        ORDER BY pr.created_at DESC
        LIMIT ? OFFSET ?`,
@@ -356,6 +343,52 @@ class ReviewService {
   }
 
   /**
+   * Kiểm tra user có quyền đánh giá sản phẩm không
+   */
+  async canUserReview(userId: number, productId: number): Promise<{
+    canReview: boolean;
+    reason?: string;
+    orderId?: number;
+  }> {
+    // Kiểm tra đã review chưa
+    const [existingReview] = await query<RowDataPacket[]>(
+      "SELECT review_id FROM product_reviews WHERE product_id = ? AND user_id = ?",
+      [productId, userId]
+    );
+
+    if (existingReview) {
+      return {
+        canReview: false,
+        reason: "Bạn đã đánh giá sản phẩm này rồi",
+      };
+    }
+
+    // Kiểm tra đã mua hàng chưa (cho phép review khi đơn hàng đã PROCESSING trở lên)
+    const deliveredOrders = await query<RowDataPacket[]>(
+      `SELECT o.order_id
+       FROM \`order\` o
+       JOIN customer c ON o.customer_id = c.customer_id
+       JOIN order_detail od ON o.order_id = od.order_id
+       WHERE c.user_id = ? AND od.product_id = ?
+         AND o.status IN ('PROCESSING', 'SHIPPED', 'COMPLETED')
+       LIMIT 1`,
+      [userId, productId]
+    );
+
+    if (deliveredOrders.length === 0) {
+      return {
+        canReview: false,
+        reason: "Bạn cần mua và nhận sản phẩm này để có thể đánh giá",
+      };
+    }
+
+    return {
+      canReview: true,
+      orderId: deliveredOrders[0].order_id,
+    };
+  }
+
+  /**
    * Map database row to ProductReview
    */
   private mapReview(row: RowDataPacket): ProductReview {
@@ -375,6 +408,7 @@ class ReviewService {
       updated_at: row.updated_at,
       user_name: row.user_name,
       user_email: row.user_email,
+      product_name: row.product_name,
     };
   }
 }

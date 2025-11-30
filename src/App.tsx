@@ -10,6 +10,7 @@ import { Checkout } from "./components/Checkout";
 import { AuthPage } from "./components/AuthPage";
 import { AdminDashboard } from "./components/AdminDashboard";
 import ProductDetail from "./components/ProductDetail";
+import UserProfile from "./components/UserProfile";
 import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner@2.0.3";
 import { Card } from "./components/ui/card";
@@ -43,6 +44,25 @@ export default function App() {
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   const [selectedOrderLoading, setSelectedOrderLoading] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
+  const [showUserProfile, setShowUserProfile] = useState(false);
+
+  const fetchOrdersNow = async () => {
+    if (!isLoggedIn || !authToken) {
+      setOrderHistory([]);
+      return;
+    }
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/orders/me`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const data = await resp.json().catch(() => []);
+      if (!resp.ok) throw new Error(data?.message || "Khong the tai don hang");
+      setOrderHistory(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.warn("Load order history failed", err);
+      setOrderHistory([]);
+    }
+  };
 
   // Refs for sections
   const homeRef = useRef(null);
@@ -124,6 +144,35 @@ export default function App() {
     };
   }, []);
 
+  // Restore token from localStorage on mount
+  useEffect(() => {
+    const storedToken = localStorage.getItem("token");
+    if (storedToken) {
+      // Verify token by calling /api/auth/me
+      fetch(`${API_BASE_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${storedToken}` },
+      })
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.user) {
+            const adminStatus = typeof data.user.role === "string" && data.user.role.toUpperCase() === "ADMIN";
+            setUserEmail(data.user.email);
+            setUserRole(data.user.role);
+            setAuthToken(storedToken);
+            setIsAdmin(adminStatus);
+            setIsLoggedIn(true);
+          } else {
+            // Token invalid, remove it
+            localStorage.removeItem("token");
+          }
+        })
+        .catch(() => {
+          // Token invalid, remove it
+          localStorage.removeItem("token");
+        });
+    }
+  }, []);
+
   // Filter products
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
@@ -152,31 +201,8 @@ export default function App() {
       .map((entry) => entry.product);
   }, [products]);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchOrders() {
-      if (!isLoggedIn || !authToken) {
-        setOrderHistory([]);
-        return;
-      }
-      try {
-        const resp = await fetch(`${API_BASE_URL}/api/orders/me`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        });
-        const data = await resp.json().catch(() => []);
-        if (!resp.ok) throw new Error(data?.message || "Khong the tai don hang");
-        if (!cancelled) setOrderHistory(Array.isArray(data) ? data : []);
-      } catch (err) {
-        if (!cancelled) {
-          console.warn("Load order history failed", err);
-          setOrderHistory([]);
-        }
-      }
-    }
-    fetchOrders();
-    return () => {
-      cancelled = true;
-    };
+useEffect(() => {
+    fetchOrdersNow();
   }, [isLoggedIn, authToken]);
 
   // Scroll to section
@@ -237,18 +263,26 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const handleCheckoutComplete = (orderData?: any) => {
-    setIsCheckout(false);
-    setOrderComplete(true);
-    if (orderData) setLastOrder(orderData);
-    setCartItems([]);
-    toast.success("Đặt hàng thành công! Cảm ơn bạn đã mua hàng.");
-    window.scrollTo({ top: 0, behavior: "smooth" });
-    
-    // Auto hide success message after 5 seconds
-    setTimeout(() => {
-      setOrderComplete(false);
-    }, 5000);
+const handleCheckoutComplete = (orderData?: any) => {
+  setIsCheckout(false);
+  setOrderComplete(true);
+  if (orderData) {
+    setLastOrder(orderData);
+    // push ngay vào lịch sử tạm thời
+    setOrderHistory((prev) => {
+      const next = Array.isArray(prev) ? prev : [];
+      return [orderData, ...next];
+    });
+  }
+  setCartItems([]);
+  toast.success("Đặt hàng thành công! Cảm ơn bạn đã mua hàng.");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  fetchOrdersNow();
+  
+  // Auto hide success message after 5 seconds
+  setTimeout(() => {
+    setOrderComplete(false);
+  }, 5000);
   };
 
   const handleViewInvoice = async (orderId: number) => {
@@ -280,6 +314,10 @@ export default function App() {
 
   const handleLogin = ({ email, role, token }) => {
     const adminStatus = typeof role === "string" && role.toUpperCase() === "ADMIN";
+
+    // Save token to localStorage
+    localStorage.setItem("token", token);
+
     setUserEmail(email);
     setUserRole(role);
     setAuthToken(token);
@@ -301,6 +339,9 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    // Remove token from localStorage
+    localStorage.removeItem("token");
+
     setIsLoggedIn(false);
     setIsAdmin(false);
     setUserEmail("");
@@ -369,6 +410,7 @@ export default function App() {
           isAdmin={isAdmin}
           onLoginClick={() => setShowAuth(true)}
           onLogoutClick={handleLogout}
+          onProfileClick={() => setShowUserProfile(true)}
         />
         <div className="container mx-auto px-4 py-16">
           <div className="max-w-2xl mx-auto text-center">
@@ -436,6 +478,7 @@ export default function App() {
         isAdmin={isAdmin}
         onLoginClick={() => setShowAuth(true)}
         onLogoutClick={handleLogout}
+        onProfileClick={() => setShowUserProfile(true)}
       />
       
       {/* Home Section */}
@@ -835,6 +878,16 @@ export default function App() {
           productId={selectedProductId}
           onClose={() => setSelectedProductId(null)}
           onAddToCart={handleAddToCart}
+        />
+      )}
+
+      {/* User Profile Modal */}
+      {showUserProfile && isLoggedIn && authToken && (
+        <UserProfile
+          onClose={() => setShowUserProfile(false)}
+          authToken={authToken}
+          userEmail={userEmail}
+          onProfileUpdated={(newEmail) => setUserEmail(newEmail)}
         />
       )}
 

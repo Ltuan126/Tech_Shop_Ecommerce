@@ -12,6 +12,7 @@ import dealsRouter from "./routes/deals";
 import cartRouter from "./routes/cart";
 import supportRouter from "./routes/support";
 import reviewsRouter from "./routes/reviews";
+import couponsRouter from "./routes/coupons";
 
 const app = express();
 const PORT = Number(process.env.API_PORT ?? 3001);
@@ -30,6 +31,7 @@ app.use("/api/deals", dealsRouter);
 app.use("/api/cart", cartRouter);
 app.use("/api/support", supportRouter);
 app.use("/api/reviews", reviewsRouter);
+app.use("/api/coupons", couponsRouter);
 
 app.listen(PORT, () => {
   console.log(`API server listening on http://localhost:${PORT}`);

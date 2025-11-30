@@ -1,5 +1,5 @@
 import type { MouseEvent } from "react";
-import { ShoppingCart, Search, User, LogOut, UserCircle } from "lucide-react";
+import { ShoppingCart, Search, User, LogOut, UserCircle, Settings } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
@@ -22,6 +22,7 @@ interface HeaderProps {
   isAdmin?: boolean;
   onLoginClick?: () => void;
   onLogoutClick?: () => void;
+  onProfileClick?: () => void;
 }
 
 export function Header({
@@ -34,6 +35,7 @@ export function Header({
   isAdmin,
   onLoginClick,
   onLogoutClick,
+  onProfileClick,
 }: HeaderProps) {
   const handleNavClick = (e: MouseEvent<HTMLAnchorElement>, section: string) => {
     e.preventDefault();
@@ -136,6 +138,10 @@ export function Header({
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={onProfileClick} className="cursor-pointer">
+                    <Settings className="mr-2 h-4 w-4" />
+                    <span>Thông tin cá nhân</span>
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={onLogoutClick} className="cursor-pointer">
                     <LogOut className="mr-2 h-4 w-4" />
                     <span>Đăng xuất</span>
