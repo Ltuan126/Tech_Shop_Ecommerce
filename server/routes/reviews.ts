@@ -44,19 +44,6 @@ router.get("/", async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/reviews/:id
- * Lấy chi tiết 1 review
- */
-router.get("/:id", async (req: Request, res: Response) => {
-  try {
-    const review = await reviewService.getReviewById(Number(req.params.id));
-    res.json(review);
-  } catch (error: any) {
-    res.status(404).json({ error: error.message });
-  }
-});
-
-/**
  * GET /api/reviews/product/:productId/summary
  * Lấy rating summary của sản phẩm
  */
@@ -72,6 +59,35 @@ router.get("/product/:productId/summary", async (req: Request, res: Response) =>
 // =====================================================
 // PROTECTED ROUTES - Cần đăng nhập
 // =====================================================
+
+/**
+ * GET /api/reviews/can-review/:productId
+ * Kiểm tra user có quyền đánh giá sản phẩm không
+ */
+router.get("/can-review/:productId", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const productId = Number(req.params.productId);
+
+    const result = await reviewService.canUserReview(userId, productId);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/reviews/:id
+ * Lấy chi tiết 1 review
+ */
+router.get("/:id", async (req: Request, res: Response) => {
+  try {
+    const review = await reviewService.getReviewById(Number(req.params.id));
+    res.json(review);
+  } catch (error: any) {
+    res.status(404).json({ error: error.message });
+  }
+});
 
 /**
  * POST /api/reviews

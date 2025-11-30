@@ -16,6 +16,12 @@ export interface CustomerWithOrders extends CustomerRecord {
   totalSpent: number;
 }
 
+interface CustomerListFilter {
+  keyword?: string;
+  city?: string;
+  includeDisabled?: boolean;
+}
+
 export interface CreateCustomerPayload {
   name: string;
   email: string;
@@ -38,8 +44,10 @@ export interface UpdateCustomerPayload {
  * List all customers (users with role 'CUSTOMER')
  * Supports filtering by keyword (name/email) and city
  */
-export const listCustomers = async (filter: any): Promise<CustomerWithOrders[]> => {
-  const { keyword, city } = filter;
+export const listCustomers = async (filter: CustomerListFilter): Promise<CustomerWithOrders[]> => {
+  const { keyword, city, includeDisabled } = filter;
+  const roles = ["CUSTOMER", "USER"];
+  if (includeDisabled) roles.push("DISABLED");
 
   let sql = `
     SELECT
@@ -55,10 +63,10 @@ export const listCustomers = async (filter: any): Promise<CustomerWithOrders[]> 
     FROM user u
     LEFT JOIN customer c ON c.user_id = u.user_id
     LEFT JOIN \`order\` o ON o.customer_id = c.customer_id
-    WHERE u.role IN ('CUSTOMER', 'USER')
+    WHERE u.role IN (${roles.map(() => "?").join(",")})
   `;
 
-  const params: any[] = [];
+  const params: any[] = [...roles];
 
   if (keyword) {
     sql += ` AND (u.name LIKE ? OR u.email LIKE ?)`;
@@ -208,7 +216,73 @@ export const updateCustomer = async (id: number, payload: UpdateCustomerPayload)
   return getCustomerById(id);
 };
 
-export const deleteCustomer = async (id: number): Promise<boolean> => {
-  const [result] = await query<any>(`DELETE FROM user WHERE user_id = ? AND role IN ('CUSTOMER','USER')`, [id]);
-  return (result as any)?.affectedRows > 0;
+export const restoreCustomer = async (id: number): Promise<CustomerWithOrders | null> => {
+  const rows = await query<any[]>(
+    `SELECT role FROM user WHERE user_id = ? LIMIT 1`,
+    [id]
+  );
+  if (!rows[0]) return null;
+
+  const currentRole = rows[0].role as string;
+  if (currentRole !== "DISABLED") {
+    return getCustomerById(id);
+  }
+
+  await query(`UPDATE user SET role = 'CUSTOMER' WHERE user_id = ?`, [id]);
+  return getCustomerById(id);
+};
+
+export interface DeleteCustomerResult {
+  deleted: boolean;
+  blockedByReference?: boolean;
+  notFound?: boolean;
+}
+
+export const deleteCustomer = async (id: number): Promise<DeleteCustomerResult> => {
+  // Look up user + optional customer row
+  const rows = await query<any[]>(
+    `SELECT u.user_id, u.role, c.customer_id
+     FROM user u
+     LEFT JOIN customer c ON c.user_id = u.user_id
+     WHERE u.user_id = ?
+     LIMIT 1`,
+    [id]
+  );
+  if (!rows[0]) {
+    return { deleted: false, notFound: true };
+  }
+  const customerId = rows[0].customer_id ? Number(rows[0].customer_id) : null;
+
+  // If has orders, do not delete; soft-disable instead
+  if (customerId) {
+    const [orderRef] = await query<any[]>(
+      `SELECT COUNT(*) AS total FROM \`order\` WHERE customer_id = ? LIMIT 1`,
+      [customerId]
+    );
+    const hasOrders = Number(orderRef?.total ?? 0) > 0;
+
+    if (hasOrders) {
+      // Do not delete if there are existing orders to preserve data integrity
+      return { deleted: false, blockedByReference: true };
+    }
+  }
+
+  // No orders (or no customer row): delete from customer then user in a transaction
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute(`DELETE FROM customer WHERE user_id = ?`, [id]);
+    const [res] = await conn.execute(`DELETE FROM user WHERE user_id = ?`, [id]);
+    await conn.commit();
+    return { deleted: (res as any)?.affectedRows > 0 };
+  } catch (err) {
+    await conn.rollback();
+    // If FK still blocks (unexpected), surface as blocked
+    if ((err as any)?.errno === 1451 || (err as any)?.code === "ER_ROW_IS_REFERENCED_2") {
+      return { deleted: false, blockedByReference: true };
+    }
+    throw err;
+  } finally {
+    conn.release();
+  }
 };

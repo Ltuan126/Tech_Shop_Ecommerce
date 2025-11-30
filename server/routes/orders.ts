@@ -60,12 +60,18 @@ router.patch("/:id/status", requireAuth, async (req: AuthenticatedRequest, res) 
 
     const id = Number(req.params.id);
     const { status } = req.body ?? {};
-    const allowed = ["PENDING", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"];
+    const allowed = ["PENDING", "PROCESSING", "SHIPPED", "DELIVERED", "COMPLETED", "CANCELLED"];
     if (!status || !allowed.includes(String(status).toUpperCase())) {
       return res.status(400).json({ message: "Trạng thái không hợp lệ" });
     }
 
-    await setOrderStatus(id, String(status).toLowerCase() as any, req.user?.id);
+    // Map "delivered" to "completed" for database compatibility
+    let dbStatus = String(status).toLowerCase();
+    if (dbStatus === "delivered") {
+      dbStatus = "completed";
+    }
+
+    await setOrderStatus(id, dbStatus as any, req.user?.id);
     const order = await getOrderById(id);
     res.json(order);
   } catch (err: any) {

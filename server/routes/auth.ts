@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { registerUser, loginUser, getCurrentUser, AuthError } from "../services/authService";
+import { requireAuth, AuthenticatedRequest } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -63,6 +64,63 @@ router.get("/me", async (req, res) => {
 
 router.post("/logout", (_req, res) => {
   res.json({ message: "Logout not implemented" });
+});
+
+// PUT /api/auth/profile - Update user profile
+router.put("/profile", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const userId = req.user!.id;
+    const { email, password, fullName } = req.body;
+
+    // Import db query
+    const { query } = await import("../../src/lib/db");
+
+    // Update user
+    const updates: string[] = [];
+    const values: any[] = [];
+
+    if (email) {
+      updates.push("email = ?");
+      values.push(email);
+    }
+
+    if (fullName) {
+      updates.push("full_name = ?");
+      values.push(fullName);
+    }
+
+    if (password) {
+      const bcrypt = await import("bcrypt");
+      const hashedPassword = await bcrypt.hash(password, 10);
+      updates.push("password = ?");
+      values.push(hashedPassword);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ message: "Không có thông tin để cập nhật" });
+    }
+
+    values.push(userId);
+
+    await query(
+      `UPDATE user SET ${updates.join(", ")} WHERE user_id = ?`,
+      values
+    );
+
+    // Get updated user
+    const [updatedUser]: any = await query(
+      "SELECT user_id, email, role, created_at FROM user WHERE user_id = ?",
+      [userId]
+    );
+
+    res.json({ user: updatedUser });
+  } catch (error: any) {
+    console.error("[PUT /api/auth/profile] failed:", error);
+    if (error.code === "ER_DUP_ENTRY") {
+      return res.status(400).json({ message: "Email đã được sử dụng" });
+    }
+    res.status(500).json({ message: "Không thể cập nhật thông tin" });
+  }
 });
 
 export default router;

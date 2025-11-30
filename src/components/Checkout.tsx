@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, CreditCard, Truck } from "lucide-react";
+import { ArrowLeft, CreditCard, Truck, Tag, X } from "lucide-react";
 import type { CartItem } from "./ShoppingCart";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
@@ -27,6 +27,10 @@ export function Checkout({ items, onBack, onComplete, authToken }: CheckoutProps
     ward: "",
     note: "",
   });
+  const [couponCode, setCouponCode] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState("");
 
   const formatVND = (amount: number) =>
     new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(amount);
@@ -34,7 +38,51 @@ export function Checkout({ items, onBack, onComplete, authToken }: CheckoutProps
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const freeShippingThreshold = 1250000;
   const shippingFee = subtotal >= freeShippingThreshold ? 0 : 50000;
-  const total = subtotal + shippingFee;
+  const discount = appliedCoupon ? appliedCoupon.discountAmount : 0;
+  const total = subtotal + shippingFee - discount;
+
+  const handleApplyCoupon = async () => {
+    if (!couponCode.trim()) {
+      setCouponError("Vui lòng nhập mã khuyến mãi");
+      return;
+    }
+
+    setCouponLoading(true);
+    setCouponError("");
+
+    try {
+      const response = await fetch("/api/coupons/validate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          code: couponCode.trim(),
+          orderTotal: subtotal + shippingFee,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Mã khuyến mãi không hợp lệ");
+      }
+
+      setAppliedCoupon(data);
+      setCouponError("");
+    } catch (error: any) {
+      setCouponError(error.message);
+      setAppliedCoupon(null);
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponCode("");
+    setCouponError("");
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,6 +106,7 @@ export function Checkout({ items, onBack, onComplete, authToken }: CheckoutProps
         }`.replace(/,\s*,/g, ","),
         paymentMethod: paymentMethod.toUpperCase(),
         note: formData.note,
+        couponCode: (appliedCoupon?.coupon?.code || couponCode || "").trim() || undefined,
       };
 
       const resp = await fetch("/api/orders", {
@@ -311,11 +360,73 @@ export function Checkout({ items, onBack, onComplete, authToken }: CheckoutProps
                   </div>
                 )}
 
+                {/* Coupon Section */}
+                <div className="pt-3 border-t">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Tag className="w-4 h-4 text-gray-600" />
+                    <span className="text-sm font-medium text-gray-700">Mã khuyến mãi</span>
+                  </div>
+
+                  {!appliedCoupon ? (
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Nhập mã khuyến mãi"
+                          value={couponCode}
+                          onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                          disabled={couponLoading}
+                          className="flex-1"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleApplyCoupon}
+                          disabled={couponLoading || !couponCode.trim()}
+                        >
+                          {couponLoading ? "Đang kiểm tra..." : "Áp dụng"}
+                        </Button>
+                      </div>
+                      {couponError && (
+                        <p className="text-sm text-red-600">{couponError}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="bg-green-50 p-3 rounded-lg">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <p className="text-sm font-medium text-green-800">
+                            Mã "{appliedCoupon.coupon.code}" đã được áp dụng
+                          </p>
+                          <p className="text-xs text-green-600 mt-1">
+                            Giảm {formatVND(appliedCoupon.discountAmount)}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleRemoveCoupon}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Discount Display */}
+                {appliedCoupon && (
+                  <div className="flex justify-between text-sm text-green-600">
+                    <span>Giảm giá</span>
+                    <span>-{formatVND(discount)}</span>
+                  </div>
+                )}
+
                 <Separator />
 
                 <div className="flex justify-between items-center">
-                  <span className="text-lg">Tong cong</span>
-                  <span className="text-2xl text-blue-600">{formatVND(total)}</span>
+                  <span className="text-lg font-semibold">Tổng cộng</span>
+                  <span className="text-2xl font-bold text-blue-600">{formatVND(total)}</span>
                 </div>
               </div>
 

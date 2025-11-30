@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Star } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Star, ShieldCheck } from "lucide-react";
 
 interface ReviewFormProps {
   productId: number;
@@ -13,6 +13,52 @@ export default function ReviewForm({ productId, onSubmitSuccess }: ReviewFormPro
   const [comment, setComment] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [canReview, setCanReview] = useState<boolean | null>(null);
+  const [checkingPermission, setCheckingPermission] = useState(true);
+
+  useEffect(() => {
+    const checkReviewPermission = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        if (!token) {
+          // Chưa đăng nhập - không gọi API, chỉ set state
+          setCanReview(false);
+          setError("Vui lòng đăng nhập để có thể đánh giá sản phẩm");
+          setCheckingPermission(false);
+          return;
+        }
+
+        // Đã đăng nhập - gọi API kiểm tra quyền
+        const response = await fetch(`http://localhost:3001/api/reviews/can-review/${productId}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          setCanReview(false);
+          setError("Không thể kiểm tra quyền đánh giá");
+          setCheckingPermission(false);
+          return;
+        }
+
+        const data = await response.json();
+        setCanReview(data.canReview);
+        if (!data.canReview) {
+          // Đã đăng nhập nhưng chưa mua hoặc đã review rồi
+          setError(data.reason || "Bạn không thể đánh giá sản phẩm này");
+        }
+      } catch (err) {
+        console.error("Error checking permission:", err);
+        setCanReview(false);
+        setError("Không thể kiểm tra quyền đánh giá");
+      } finally {
+        setCheckingPermission(false);
+      }
+    };
+
+    checkReviewPermission();
+  }, [productId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,8 +107,35 @@ export default function ReviewForm({ productId, onSubmitSuccess }: ReviewFormPro
     }
   };
 
+  // Loading state
+  if (checkingPermission) {
+    return (
+      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+        <div className="flex justify-center items-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        </div>
+      </div>
+    );
+  }
+
+  // Cannot review
+  if (canReview === false) {
+    return (
+      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+        <h3 className="text-xl font-semibold mb-4">Viết đánh giá của bạn</h3>
+        <div className="flex items-start gap-3 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+          <ShieldCheck className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="font-medium text-yellow-900 mb-1">Không thể đánh giá</p>
+            <p className="text-sm text-yellow-800">{error || "Bạn cần mua và nhận sản phẩm này để có thể đánh giá"}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 overflow-visible">
       <h3 className="text-xl font-semibold mb-4">Viết đánh giá của bạn</h3>
 
       {error && (
@@ -71,7 +144,7 @@ export default function ReviewForm({ productId, onSubmitSuccess }: ReviewFormPro
         </div>
       )}
 
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} className="overflow-visible">
         {/* Rating Stars */}
         <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -134,15 +207,36 @@ export default function ReviewForm({ productId, onSubmitSuccess }: ReviewFormPro
         </div>
 
         {/* Submit Button */}
-        <div className="mt-6">
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors shadow-md"
-          >
-            {isSubmitting ? "Đang gửi..." : "Gửi đánh giá"}
-          </button>
-        </div>
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          style={{
+            width: '100%',
+            backgroundColor: isSubmitting ? '#9ca3af' : '#2563eb',
+            color: 'white',
+            padding: '12px 24px',
+            borderRadius: '8px',
+            fontWeight: '600',
+            fontSize: '16px',
+            border: 'none',
+            cursor: isSubmitting ? 'not-allowed' : 'pointer',
+            display: 'block',
+            marginTop: '24px',
+            transition: 'background-color 0.2s'
+          }}
+          onMouseEnter={(e) => {
+            if (!isSubmitting) {
+              e.currentTarget.style.backgroundColor = '#1d4ed8';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!isSubmitting) {
+              e.currentTarget.style.backgroundColor = '#2563eb';
+            }
+          }}
+        >
+          {isSubmitting ? "Đang gửi..." : "Gửi đánh giá"}
+        </button>
       </form>
     </div>
   );

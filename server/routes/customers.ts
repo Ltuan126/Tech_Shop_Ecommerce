@@ -14,9 +14,15 @@ function ensureAdmin(req: AuthenticatedRequest, res, next) {
 // GET /api/customers
 router.get("/", async (req, res) => {
   try {
+    const keyword = typeof req.query.keyword === "string" ? req.query.keyword : "";
+    const city = typeof req.query.city === "string" ? req.query.city : "";
+    // Luôn kèm khách hàng DISABLED để admin có thể khôi phục
+    const includeDisabled = true;
+
     const filter = {
-      keyword: req.query.keyword || "",
-      city: req.query.city || "",
+      keyword,
+      city,
+      includeDisabled,
     };
     const data = await customerService.listCustomers(filter);
     res.json(data);
@@ -87,12 +93,34 @@ router.delete("/:id", requireAuth, ensureAdmin, async (req: AuthenticatedRequest
   try {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) return res.status(400).json({ message: "ID không hợp lệ" });
-    const ok = await customerService.deleteCustomer(id);
-    if (!ok) return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+    const result = await customerService.deleteCustomer(id);
+    if (result.notFound) {
+      return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+    }
+    if (result.blockedByReference) {
+      return res.status(409).json({
+        message: "Khách hàng đã có đơn hàng/dữ liệu liên quan nên không thể xóa để đảm bảo toàn vẹn dữ liệu.",
+      });
+    }
+    if (!result.deleted) return res.status(404).json({ message: "Không tìm thấy khách hàng" });
     res.json({ success: true });
   } catch (error: any) {
     console.error("[DELETE /api/customers/:id] failed:", error);
     res.status(400).json({ message: error?.message || "Không thể xóa khách hàng" });
+  }
+});
+
+// PATCH /api/customers/:id/restore (admin)
+router.patch("/:id/restore", requireAuth, ensureAdmin, async (req: AuthenticatedRequest, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) return res.status(400).json({ message: "ID không hợp lệ" });
+    const restored = await customerService.restoreCustomer(id);
+    if (!restored) return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+    res.json(restored);
+  } catch (error: any) {
+    console.error("[PATCH /api/customers/:id/restore] failed:", error);
+    res.status(400).json({ message: error?.message || "Không thể khôi phục khách hàng" });
   }
 });
 

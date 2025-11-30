@@ -25,6 +25,8 @@ export interface ProductFilter {
   categoryId?: number;
   priceMin?: number;
   priceMax?: number;
+  includeInactive?: boolean;
+  status?: "ACTIVE" | "INACTIVE" | "OUT_OF_STOCK";
 }
 
 export async function listProducts(
@@ -67,6 +69,13 @@ export async function listProducts(
   if (typeof filter.priceMax === "number") {
     sql += " AND p.price <= ?";
     params.push(filter.priceMax);
+  }
+
+  if (filter.status) {
+    sql += " AND p.status = ?";
+    params.push(filter.status);
+  } else if (!filter.includeInactive) {
+    sql += " AND p.status != 'INACTIVE'";
   }
 
   sql += " ORDER BY p.product_id";
@@ -175,7 +184,26 @@ export async function updateProduct(
   return getProductById(id);
 }
 
-export async function deleteProduct(id: number): Promise<boolean> {
-  const res = await query<any>(`DELETE FROM product WHERE product_id = ?`, [id]);
-  return (res as any)?.affectedRows > 0;
+export interface DeleteProductResult {
+  deleted: boolean;
+  blockedByReference?: boolean;
+  deactivated?: boolean;
+}
+
+export async function deleteProduct(id: number): Promise<DeleteProductResult> {
+  try {
+    const res = await query<any>(`DELETE FROM product WHERE product_id = ?`, [id]);
+    return { deleted: (res as any)?.affectedRows > 0 };
+  } catch (err: any) {
+    // MySQL error when row is referenced by FK (errno 1451 / ER_ROW_IS_REFERENCED_2)
+    if (err?.errno === 1451 || err?.code === "ER_ROW_IS_REFERENCED_2") {
+      // Soft-delete fallback: mark product inactive and zero stock so it disappears from public lists
+      await query(
+        `UPDATE product SET status = 'INACTIVE', stock = 0 WHERE product_id = ?`,
+        [id]
+      );
+      return { deleted: false, blockedByReference: true, deactivated: true };
+    }
+    throw err;
+  }
 }

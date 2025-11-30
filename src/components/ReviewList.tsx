@@ -41,14 +41,25 @@ export default function ReviewList({ productId, refreshTrigger }: ReviewListProp
       const reviewsData = await reviewsResponse.json();
       setReviews(reviewsData.reviews || []);
 
-      // Fetch summary
-      const summaryResponse = await fetch(
-        `http://localhost:3001/api/reviews/product/${productId}/summary`
-      );
-      const summaryData = await summaryResponse.json();
-      setSummary(summaryData);
+      // Fetch summary (with error handling)
+      try {
+        const summaryResponse = await fetch(
+          `http://localhost:3001/api/reviews/product/${productId}/summary`
+        );
+        if (summaryResponse.ok) {
+          const summaryData = await summaryResponse.json();
+          setSummary(summaryData);
+        } else {
+          setSummary(null);
+        }
+      } catch (summaryError) {
+        console.error("Error fetching summary:", summaryError);
+        setSummary(null);
+      }
     } catch (error) {
       console.error("Error fetching reviews:", error);
+      setReviews([]);
+      setSummary(null);
     } finally {
       setLoading(false);
     }
@@ -133,10 +144,10 @@ export default function ReviewList({ productId, refreshTrigger }: ReviewListProp
             {/* Average Rating */}
             <div className="flex flex-col items-center justify-center border-r">
               <div className="text-5xl font-bold text-gray-900">
-                {summary.avg_rating.toFixed(1)}
+                {Number(summary.avg_rating).toFixed(1)}
               </div>
               <div className="flex gap-1 my-2">
-                {renderStars(Math.round(summary.avg_rating))}
+                {renderStars(Math.round(Number(summary.avg_rating)))}
               </div>
               <div className="text-gray-600">
                 {summary.review_count} đánh giá
@@ -145,11 +156,11 @@ export default function ReviewList({ productId, refreshTrigger }: ReviewListProp
 
             {/* Rating Distribution */}
             <div className="space-y-1">
-              {renderRatingBar(5, summary.five_star_count, summary.review_count)}
-              {renderRatingBar(4, summary.four_star_count, summary.review_count)}
-              {renderRatingBar(3, summary.three_star_count, summary.review_count)}
-              {renderRatingBar(2, summary.two_star_count, summary.review_count)}
-              {renderRatingBar(1, summary.one_star_count, summary.review_count)}
+              {renderRatingBar(5, Number(summary.five_star_count), Number(summary.review_count))}
+              {renderRatingBar(4, Number(summary.four_star_count), Number(summary.review_count))}
+              {renderRatingBar(3, Number(summary.three_star_count), Number(summary.review_count))}
+              {renderRatingBar(2, Number(summary.two_star_count), Number(summary.review_count))}
+              {renderRatingBar(1, Number(summary.one_star_count), Number(summary.review_count))}
             </div>
           </div>
 
